@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="128" height="128" viewBox="0 0 128 128">
+  <!-- Временная иконка до этапа 3 -->
+  <rect width="128" height="128" rx="24" fill="#efe6d8"/>
+  <path d="M20 96 L64 96 L64 32 L108 32" fill="none" stroke="#5a5a5a" stroke-width="16" stroke-linecap="round" stroke-linejoin="round"/>
+  <rect x="12" y="84" width="22" height="22" rx="3" fill="#e0605a"/>
+  <rect x="94" y="18" width="26" height="26" rx="3" fill="#e0605a"/>
+</svg>

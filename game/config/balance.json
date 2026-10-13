@@ -1,0 +1,13 @@
+{
+	"start_tiles": 60,
+	"start_bridges": 2,
+	"cars_per_house": 1,
+	"car_speed": 2.0,
+	"car_gap": 0.4,
+	"intersection_radius": 0.3,
+	"parking_time": 1.0,
+	"pin_interval": 7.0,
+	"overflow_pins": 5,
+	"overflow_time": 20.0,
+	"overflow_recovery": 0.5
+}

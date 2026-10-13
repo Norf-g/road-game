@@ -1,0 +1,65 @@
+# CLAUDE.md
+
+This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+
+## Проект
+Мобильная игра под Android по мотивам Mini Motorways: игрок прокладывает дороги в растущем городе. Все продуктовые решения и правила собраны в [docs/gdd.md](docs/gdd.md); читай его перед изменениями геймплея. Текущий этап разработки указан в разделе «Этапы» дизайн-документа.
+
+Код пишет Claude, пользователь проверяет и тестирует на Xiaomi 15 (Android 16, HyperOS). Общение и комментарии в коде — на русском, идентификаторы — на английском.
+
+## Окружение (Windows, Git Bash)
+- Godot 4.7.2, без установщика, в режиме self-contained: `C:/tools/godot/`. Настройки редактора и шаблоны экспорта лежат в `C:/tools/godot/editor_data/`, а не в `%APPDATA%`.
+- Пути к Java (`C:/Users/user/.jdks/jbr-21.0.11`) и Android SDK (`C:/Users/user/AppData/Local/Android/Sdk`) прописаны в настройках редактора Godot. Системные переменные (`JAVA_HOME`, `ANDROID_HOME`) не используются, не меняй их.
+- Экспорт без Gradle-сборки (`gradle_build/use_gradle_build=false`), NDK не нужен.
+
+```bash
+GODOT=/c/tools/godot/Godot_v4.7.2-stable_win64_console.exe
+ADB=/c/Users/user/AppData/Local/Android/Sdk/platform-tools/adb.exe
+```
+
+## Команды
+Все команды выполняются из корня репозитория.
+
+```bash
+# Импорт ресурсов: нужен после клонирования и после добавления новых class_name/CSV
+$GODOT --headless --path game --import
+
+# Все тесты (GUT, настройки в game/.gutconfig.json); ненулевой код возврата при падении
+$GODOT --headless --path game -s addons/gut/gut_cmdln.gd
+
+# Один файл тестов / одна функция
+$GODOT --headless --path game -s addons/gut/gut_cmdln.gd -gtest=res://tests/sim/test_grid.gd
+$GODOT --headless --path game -s addons/gut/gut_cmdln.gd -gtest=res://tests/sim/test_grid.gd -gunit_test_name=test_in_bounds
+
+# Отладочный APK -> build/road-game-debug.apk
+$GODOT --headless --path game --export-debug "Android" ../build/road-game-debug.apk
+
+# Установка и запуск на телефоне, просмотр логов
+$ADB install -r build/road-game-debug.apk
+$ADB shell monkey -p dev.roadgame.prototype -c android.intent.category.LAUNCHER 1
+$ADB logcat -s godot
+```
+
+## Архитектура
+Логика игры отделена от отображения. Это главное правило проекта.
+
+- `game/sim/` — чистая симуляция: классы `RefCounted`, без нод и без обращений к сцене. Сюда входят сетка, дорожный граф, поиск пути, машины и очереди, здания и заказы, таймеры, запасы, очки и сериализация. Время идёт фиксированным шагом, скорость ×2 — это больше шагов за кадр.
+- `game/gen/` — модуль генерации («директор»): решает, что, где и когда появляется и как растёт сложность. Числа баланса берёт из `game/config/`.
+- `game/view/` — отображение. Оно только показывает состояние sim и ничего в нём не меняет. Здесь же процедурная фабрика low-poly моделей `ModelFactory`: модели строятся кодом, а не импортируются из файлов.
+- `game/input/` — жесты. Касание одним пальцем отдано текущему инструменту (дорога, ластик, шоссе), два пальца — камере. На выходе получаются команды для sim.
+- `game/ui/`, `game/app/` — интерфейс, жизненный цикл, сохранение и продолжение партии, настройки.
+- `game/tests/` — тесты GUT, зеркалят структуру папок (`tests/sim/`, `tests/gen/` и т.д.).
+
+Правила:
+- В `sim/` и `gen/` вся случайность идёт только через RNG партии с seed. Глобальные `randf()`/`randi()` запрещены: одна и та же пара (seed, команды) должна давать одинаковую партию, на этом построены тесты и сохранения.
+- Числа баланса не хардкодятся в логике, они лежат в конфиге.
+- Все строки интерфейса выводятся через `tr("KEY")`, ключи и переводы — в `game/i18n/strings.csv`. В первой версии только колонка `ru`.
+- GDScript пишем со статической типизацией.
+- Туннелей и гор в игре нет: через реку — только мосты.
+
+## Графика
+3D-модели строятся кодом. Gemini делает только 2D: иконки, интерфейс, графику для магазина, текстуры. С этапа 3 шаблоны запросов, описание стиля и список нужных картинок лежат в `art/`, обработка картинок — скрипты в `tools/`.
+
+## Рабочий процесс
+- Каждый шаг заканчивается сборкой на телефоне. Коммит в `main` и push в `origin` делаются только после того, как пользователь проверил шаг на телефоне и одобрил его. Отдельных веток нет.
+- Магазин — RuStore. Ключ подписи для выпуска пользователь создаёт сам, в репозиторий он не попадает (`*.keystore`/`*.jks` в `.gitignore`). Имя пакета `dev.roadgame.prototype` временное.

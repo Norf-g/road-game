@@ -1,0 +1,16 @@
+keys,ru
+HUD_TILES,Дороги: %d
+HUD_BRIDGES,Мосты: %d
+HUD_SCORE,Поездки: %d
+HUD_FPS,FPS: %d
+TOOL_ROAD,Дорога
+TOOL_ERASER,Ластик
+SPEED_PAUSE,Пауза
+SPEED_X1,×1
+SPEED_X2,×2
+MSG_NO_TILES,Закончились дороги
+MSG_NO_BRIDGES,Нет свободных мостов
+MSG_CROSSING,Диагонали не могут пересекаться
+GAME_OVER_TITLE,Город встал
+GAME_OVER_SCORE,Поездок: %d
+GAME_OVER_RESTART,Заново

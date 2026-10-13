@@ -1,0 +1,22 @@
+# Локальные навыки и настройки Claude — не коммитим
+/.claude/
+
+# Godot
+.godot/
+/game/android/
+*.translation
+
+# Сборки
+/build/
+
+# Входящие картинки из Gemini (до обработки)
+/art/inbox/*
+!/art/inbox/.gitkeep
+
+# Python
+__pycache__/
+.venv/
+
+# Ключи подписи — никогда в репозиторий
+*.keystore
+*.jks
