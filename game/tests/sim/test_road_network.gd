@@ -3,26 +3,30 @@ extends GutTest
 const OK := RoadNetwork.Result.OK
 
 
-func _network(rows: Array, tiles := 10, bridges := 1) -> RoadNetwork:
+## Сеть по карте rows. Если anchored, в клетке (0, 0) стоит вход здания — от него начинаются дороги.
+func _network(rows: Array, tiles := 10, bridges := 1, anchored := true) -> RoadNetwork:
 	var map := MapData.from_dict({"rows": rows})
-	return RoadNetwork.new(Grid.new(map.size), map.water, tiles, bridges)
+	var net := RoadNetwork.new(Grid.new(map.size), map.water, tiles, bridges)
+	if anchored:
+		net.add_terminal(Vector2i(0, 0))
+	return net
 
 
 func test_build_spends_tiles_and_erase_returns_them() -> void:
 	var net := _network(["....."])
 	assert_eq(net.build(Vector2i(0, 0), Vector2i(1, 0)), OK)
 	assert_eq(net.build(Vector2i(1, 0), Vector2i(2, 0)), OK)
-	assert_eq(net.tiles_left, 7)
-	assert_true(net.erase(Vector2i(1, 0)))
 	assert_eq(net.tiles_left, 8)
+	assert_true(net.erase(Vector2i(1, 0)))
+	assert_eq(net.tiles_left, 9)
 	assert_false(net.are_linked(Vector2i(0, 0), Vector2i(1, 0)))
 	assert_false(net.are_linked(Vector2i(1, 0), Vector2i(2, 0)))
 
 
 func test_build_fails_without_tiles() -> void:
-	var net := _network(["....."], 1)
+	var net := _network(["....."], 0)
 	assert_eq(net.build(Vector2i(0, 0), Vector2i(1, 0)), RoadNetwork.Result.NO_TILES)
-	assert_eq(net.tiles_left, 1)
+	assert_eq(net.tiles_left, 0)
 
 
 func test_build_rejects_far_cells_and_repeats() -> void:
@@ -35,6 +39,7 @@ func test_build_rejects_far_cells_and_repeats() -> void:
 func test_diagonals_cannot_cross() -> void:
 	var net := _network(["...", "..."])
 	assert_eq(net.build(Vector2i(0, 0), Vector2i(1, 1)), OK)
+	assert_eq(net.build(Vector2i(0, 0), Vector2i(1, 0)), OK)
 	assert_eq(net.build(Vector2i(1, 0), Vector2i(0, 1)), RoadNetwork.Result.CROSSING)
 
 
@@ -44,7 +49,7 @@ func test_bridge_span_uses_one_bridge_and_no_tiles() -> void:
 	assert_eq(net.build(Vector2i(1, 0), Vector2i(2, 0)), OK)
 	assert_eq(net.build(Vector2i(2, 0), Vector2i(3, 0)), OK)
 	assert_eq(net.bridges_used, 1)
-	assert_eq(net.tiles_left, 8)
+	assert_eq(net.tiles_left, 9)
 
 
 func test_second_span_needs_second_bridge() -> void:
@@ -90,3 +95,97 @@ func test_path_prefers_diagonal() -> void:
 	assert_eq(net.build(Vector2i(1, 0), Vector2i(1, 1)), OK)
 	assert_eq(net.build(Vector2i(0, 0), Vector2i(1, 1)), OK)
 	assert_eq(net.find_path(Vector2i(0, 0), Vector2i(1, 1)).size(), 2)
+
+
+func test_cannot_build_outside_visible_area() -> void:
+	var net := _network([".....", "....."])
+	net.bounds = Rect2i(0, 0, 3, 2)
+	assert_eq(net.build(Vector2i(2, 0), Vector2i(3, 0)), RoadNetwork.Result.OUT_OF_BOUNDS)
+	assert_eq(net.build(Vector2i(0, 0), Vector2i(1, 0)), OK)
+
+
+func test_motorway_spends_stock_and_erase_returns_it() -> void:
+	var net := _network([".........."], 10, 1, false)
+	net.motorways_left = 1
+	assert_eq(net.build_motorway(Vector2i(0, 0), Vector2i(6, 0)), OK)
+	assert_eq(net.motorways_left, 0)
+	assert_eq(net.tiles_left, 8)
+	assert_true(net.is_motorway(Vector2i(6, 0), Vector2i(0, 0)))
+	assert_true(net.erase(Vector2i(6, 0)))
+	assert_eq(net.motorways_left, 1)
+	assert_false(net.is_motorway(Vector2i(0, 0), Vector2i(6, 0)))
+
+
+func test_motorway_limits() -> void:
+	var net := _network(["..............~"], 20, 1, false)
+	assert_eq(net.build_motorway(Vector2i(0, 0), Vector2i(5, 0)), RoadNetwork.Result.NO_STOCK)
+	net.motorways_left = 1
+	net.motorway_max_length = 5.0
+	assert_eq(net.build_motorway(Vector2i(0, 0), Vector2i(8, 0)), RoadNetwork.Result.TOO_LONG)
+	assert_eq(net.build_motorway(Vector2i(0, 0), Vector2i(1, 0)), RoadNetwork.Result.NOT_ADJACENT)
+	net.motorway_max_length = 20.0
+	assert_eq(net.build_motorway(Vector2i(0, 0), Vector2i(14, 0)), RoadNetwork.Result.BLOCKED)
+
+
+func test_path_prefers_motorway() -> void:
+	var net := _network(["........", "........"], 30)
+	for x in 7:
+		assert_eq(net.build(Vector2i(x, 0), Vector2i(x + 1, 0)), OK)
+	net.motorways_left = 1
+	assert_eq(net.build(Vector2i(0, 0), Vector2i(0, 1)), OK)
+	assert_eq(net.build(Vector2i(7, 0), Vector2i(7, 1)), OK)
+	assert_eq(net.build_motorway(Vector2i(0, 1), Vector2i(7, 1)), OK)
+	assert_eq(Array(net.find_path(Vector2i(0, 0), Vector2i(7, 0))), [Vector2i(0, 0), Vector2i(0, 1), Vector2i(7, 1), Vector2i(7, 0)])
+
+
+func test_control_needs_intersection_and_stock() -> void:
+	var net := _network(["...", "..."], 10)
+	assert_eq(net.build(Vector2i(0, 0), Vector2i(1, 0)), OK)
+	assert_eq(net.build(Vector2i(1, 0), Vector2i(2, 0)), OK)
+	assert_eq(net.place_control(Vector2i(1, 0), RoadNetwork.Junction.LIGHT), RoadNetwork.Result.NOT_INTERSECTION)
+	assert_eq(net.build(Vector2i(1, 0), Vector2i(1, 1)), OK)
+	assert_eq(net.place_control(Vector2i(1, 0), RoadNetwork.Junction.LIGHT), RoadNetwork.Result.NO_STOCK)
+	net.lights_left = 1
+	assert_eq(net.place_control(Vector2i(1, 0), RoadNetwork.Junction.LIGHT), OK)
+	assert_eq(net.lights_left, 0)
+	assert_eq(net.control_at(Vector2i(1, 0)), RoadNetwork.Junction.LIGHT)
+
+
+func test_control_returns_when_intersection_disappears() -> void:
+	var net := _network(["...", "..."], 10)
+	for pair: Array in [[Vector2i(0, 0), Vector2i(1, 0)], [Vector2i(1, 0), Vector2i(2, 0)], [Vector2i(1, 0), Vector2i(1, 1)]]:
+		assert_eq(net.build(pair[0], pair[1]), OK)
+	net.roundabouts_left = 1
+	assert_eq(net.place_control(Vector2i(1, 0), RoadNetwork.Junction.ROUNDABOUT), OK)
+	assert_true(net.erase(Vector2i(1, 1)))
+	assert_eq(net.control_at(Vector2i(1, 0)), RoadNetwork.Junction.NONE)
+	assert_eq(net.roundabouts_left, 1)
+
+
+func test_road_must_continue_network() -> void:
+	var net := _network(["....."])
+	assert_eq(net.build(Vector2i(2, 0), Vector2i(3, 0)), RoadNetwork.Result.NOT_CONNECTED)
+	assert_eq(net.build(Vector2i(0, 0), Vector2i(1, 0)), OK)
+	assert_eq(net.build(Vector2i(1, 0), Vector2i(2, 0)), OK)
+
+
+func test_bridge_cannot_turn_along_river() -> void:
+	var net := _network([".~.", ".~.", ".~."], 10, 1)
+	assert_eq(net.build(Vector2i(0, 0), Vector2i(1, 0)), OK)
+	assert_eq(net.build(Vector2i(1, 0), Vector2i(1, 1)), RoadNetwork.Result.BRIDGE_SHAPE)
+	assert_eq(net.build(Vector2i(1, 0), Vector2i(2, 0)), OK)
+	assert_eq(net.build(Vector2i(1, 0), Vector2i(2, 1)), RoadNetwork.Result.BRIDGE_SHAPE, "мост без развилок")
+
+
+func test_bridge_length_is_limited() -> void:
+	var net := _network([".~~~~~."], 10, 1)
+	net.bridge_max_length = 4
+	for x in 4:
+		assert_eq(net.build(Vector2i(x, 0), Vector2i(x + 1, 0)), OK)
+	assert_eq(net.build(Vector2i(4, 0), Vector2i(5, 0)), RoadNetwork.Result.BRIDGE_TOO_LONG)
+
+
+func test_diagonal_cannot_cut_river_corner() -> void:
+	# Суша (0, 0) и (1, 1), вода в двух других углах.
+	var net := _network([".~", "~."], 10, 1)
+	assert_eq(net.build(Vector2i(0, 0), Vector2i(1, 1)), RoadNetwork.Result.BLOCKED)

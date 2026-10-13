@@ -1,16 +1,38 @@
 keys,ru
+HUD_WEEK,Неделя %d
 HUD_TILES,Дороги: %d
 HUD_BRIDGES,Мосты: %d
 HUD_SCORE,Поездки: %d
 HUD_FPS,FPS: %d
 TOOL_ROAD,Дорога
 TOOL_ERASER,Ластик
+TOOL_MOTORWAY,Шоссе
+TOOL_LIGHT,Светофор
+TOOL_ROUNDABOUT,Развязка
 SPEED_PAUSE,Пауза
 SPEED_X1,×1
 SPEED_X2,×2
 MSG_NO_TILES,Закончились дороги
 MSG_NO_BRIDGES,Нет свободных мостов
 MSG_CROSSING,Диагонали не могут пересекаться
+MSG_NOT_INTERSECTION,Ставится на перекрёсток
+MSG_OCCUPIED,Здесь уже стоит
+MSG_NO_STOCK,Нет в запасе
+MSG_TOO_LONG,Шоссе слишком длинное
+MSG_TOO_SHORT,Шоссе слишком короткое
+MSG_BLOCKED,Здесь строить нельзя
+MSG_OUT_OF_AREA,Эта часть города ещё не открыта
+OFFER_TITLE,"Неделя %d позади: +%d дорог. Выберите улучшение"
+UPGRADE_TILES,Дороги +%d
+UPGRADE_BRIDGES,Мосты +%d
+UPGRADE_LIGHT,Светофор +%d
+UPGRADE_ROUNDABOUT,Развязка +%d
+UPGRADE_MOTORWAY,Шоссе +%d
 GAME_OVER_TITLE,Город встал
 GAME_OVER_SCORE,Поездок: %d
+GAME_OVER_RECORD,Рекорд: %d
+GAME_OVER_NEW_RECORD,Новый рекорд!
 GAME_OVER_RESTART,Заново
+MSG_NOT_CONNECTED,"Начните от дома, здания или дороги"
+MSG_BRIDGE_SHAPE,Мост должен быть прямым
+MSG_BRIDGE_TOO_LONG,Мост слишком длинный

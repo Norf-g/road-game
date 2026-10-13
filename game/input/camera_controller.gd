@@ -4,7 +4,7 @@ extends Camera3D
 ## Касание одним пальцем не обрабатывается: оно отдано инструментам (дорога, ластик).
 
 @export var min_size := 6.0
-@export var max_size := 30.0
+@export var max_size := 45.0
 ## Область карты по XZ: центр экрана не уходит за её пределы.
 @export var bounds := Rect2(0, 0, 24, 14)
 

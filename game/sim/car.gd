@@ -17,6 +17,9 @@ var on_road := false
 var park_timer := 0.0
 var has_lock := false
 var lock_cell := Vector2i.ZERO
+## Откуда и куда машина проезжает перекрёсток, на который получила разрешение.
+var lock_from := Vector2i.ZERO
+var lock_to := Vector2i.ZERO
 ## Тик, с которого машина ждёт у перекрёстка; -1 — не ждёт.
 var wait_since := -1
 

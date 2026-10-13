@@ -2,10 +2,15 @@ class_name Simulation
 extends RefCounted
 ## Партия целиком: дорожная сеть, здания, машины, заказы, очки и проигрыш.
 ## Время идёт фиксированными шагами tick(). Состояние меняется только командами
-## (build_link, erase_cell) между шагами, поэтому одинаковые seed и команды дают одинаковую партию.
+## (build_link, build_motorway, place_control, erase_cell) между шагами, поэтому одинаковые
+## seed и команды дают одинаковую партию.
+## Модуль генерации подключается через director: его step() вызывается в начале каждого шага,
+## а пока у него открыт выбор улучшения (has_offer), время стоит.
 
 const TICK_RATE := 30
 const DT := 1.0 / TICK_RATE
+## Свободные машины назначаются на заказы раз в столько шагов.
+const DISPATCH_EVERY := 6
 
 var balance: Balance
 var network: RoadNetwork
@@ -17,14 +22,25 @@ var score := 0
 var tick_count := 0
 var game_over := false
 var rng := RandomNumberGenerator.new()
+## Текущий интервал между заказами у места назначения; его уменьшает модуль генерации.
+var pin_interval: float
+## Модуль генерации (Director) или null. Не типизирован, чтобы симуляция не зависела от gen/.
+var director = null
 
 var _traffic: Traffic
+var _routes := {}  # Vector2i(id дома, id места назначения) -> маршрут; сбрасывается при смене дорог
+var _routes_version := -1
 
 
 func _init(map: MapData, game_balance: Balance, seed_value: int) -> void:
 	balance = game_balance
 	rng.seed = seed_value
+	pin_interval = balance.pin_interval
 	network = RoadNetwork.new(Grid.new(map.size), map.water, balance.start_tiles, balance.start_bridges)
+	network.motorway_max_length = balance.motorway_max_length
+	network.bridge_max_length = balance.bridge_max_length
+	network.motorway_speed = balance.motorway_speed
+	network.bounds = map.area_at(0)
 	_traffic = Traffic.new(network, balance)
 	for house: Dictionary in map.houses:
 		add_house(house["cell"], house["color"])
@@ -44,7 +60,7 @@ func add_house(cell: Vector2i, color: int) -> House:
 func add_destination(rect: Rect2i, entrance: Vector2i, color: int) -> Destination:
 	var dest := Destination.new(destinations.size(), rect, entrance, color)
 	# Первые заказы у разных мест назначения появляются не одновременно.
-	dest.pin_timer = rng.randf() * balance.pin_interval
+	dest.pin_timer = rng.randf() * pin_interval
 	destinations.append(dest)
 	for y in range(rect.position.y, rect.end.y):
 		for x in range(rect.position.x, rect.end.x):
@@ -56,6 +72,14 @@ func add_destination(rect: Rect2i, entrance: Vector2i, color: int) -> Destinatio
 	return dest
 
 
+## Место назначения, которому принадлежит клетка, или null.
+func destination_at(cell: Vector2i) -> Destination:
+	for dest in destinations:
+		if dest.rect.has_point(cell):
+			return dest
+	return null
+
+
 # --- Команды -----------------------------------------------------------------
 
 func build_link(a: Vector2i, b: Vector2i) -> RoadNetwork.Result:
@@ -65,6 +89,21 @@ func build_link(a: Vector2i, b: Vector2i) -> RoadNetwork.Result:
 	if result == RoadNetwork.Result.OK:
 		_on_network_changed()
 	return result
+
+
+func build_motorway(a: Vector2i, b: Vector2i) -> RoadNetwork.Result:
+	if game_over:
+		return RoadNetwork.Result.BLOCKED
+	var result := network.build_motorway(a, b)
+	if result == RoadNetwork.Result.OK:
+		_on_network_changed()
+	return result
+
+
+func place_control(cell: Vector2i, control: RoadNetwork.Junction) -> RoadNetwork.Result:
+	if game_over:
+		return RoadNetwork.Result.BLOCKED
+	return network.place_control(cell, control)
 
 
 func erase_cell(cell: Vector2i) -> bool:
@@ -79,9 +118,14 @@ func erase_cell(cell: Vector2i) -> bool:
 func tick() -> void:
 	if game_over:
 		return
+	if director != null:
+		if director.has_offer():
+			return
+		director.step()
 	tick_count += 1
 	_spawn_pins()
-	_dispatch()
+	if tick_count % DISPATCH_EVERY == 0:
+		_dispatch()
 	_update_parked()
 	_depart()
 	for car in _traffic.step(cars, tick_count, DT):
@@ -91,7 +135,9 @@ func tick() -> void:
 
 ## Отпечаток состояния для проверки детерминизма.
 func state_hash() -> int:
-	var parts: Array = [score, tick_count, game_over]
+	var parts: Array = [score, tick_count, game_over, houses.size(), destinations.size(), network.tiles_left]
+	for house in houses:
+		parts.append([house.cell, house.color])
 	for car in cars:
 		parts.append([car.state, car.route, car.seg, snappedf(car.s, 0.0001), car.on_road])
 	for dest in destinations:
@@ -102,39 +148,45 @@ func state_hash() -> int:
 func _spawn_pins() -> void:
 	for dest in destinations:
 		dest.pin_timer += DT
-		if dest.pin_timer >= balance.pin_interval:
-			dest.pin_timer -= balance.pin_interval
+		if dest.pin_timer >= pin_interval:
+			dest.pin_timer -= pin_interval
 			dest.pins += 1
 
 
 ## Назначает на необслуженные заказы свободные машины того же цвета — ближайшие по дорогам.
 func _dispatch() -> void:
+	if _routes_version != network.version:
+		_routes.clear()
+		_routes_version = network.version
 	for dest in destinations:
-		if dest.pins <= dest.claimed:
-			continue
-		var routes := {}  # id дома -> маршрут до места назначения
 		while dest.pins > dest.claimed:
 			var best: Car = null
-			var best_length := INF
+			var best_route: Array[Vector2i] = []
+			var best_cost := INF
 			for car in cars:
 				if car.state != Car.State.IDLE or car.home.color != dest.color:
 					continue
-				if not routes.has(car.home.id):
-					routes[car.home.id] = network.find_path(car.home.cell, dest.entrance)
-				var route: Array[Vector2i] = routes[car.home.id]
+				var route := _route(car.home, dest)
 				if route.size() < 2:
 					continue
-				var length := RoadNetwork.path_length(route)
-				if length < best_length:
+				var cost := network.path_cost(route)
+				if cost < best_cost:
 					best = car
-					best_length = length
+					best_route = route
+					best_cost = cost
 			if best == null:
 				break
 			best.state = Car.State.TO_DEST
 			best.dest = dest
-			var chosen: Array[Vector2i] = routes[best.home.id]
-			best.route = chosen.duplicate()
+			best.route = best_route.duplicate()
 			dest.claimed += 1
+
+
+func _route(house: House, dest: Destination) -> Array[Vector2i]:
+	var key := Vector2i(house.id, dest.id)
+	if not _routes.has(key):
+		_routes[key] = network.find_path(house.cell, dest.entrance)
+	return _routes[key]
 
 
 func _update_parked() -> void:

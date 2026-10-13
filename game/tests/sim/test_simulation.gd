@@ -84,25 +84,65 @@ func test_cars_keep_distance_on_lane() -> void:
 	assert_gt(sim.score, 4)
 
 
-func test_intersection_lets_one_car_at_a_time() -> void:
+## Машины, которые сейчас в зоне перекрёстка center, с их проездами [откуда, куда].
+func _cars_inside(sim: Simulation, center: Vector2i) -> Array[Array]:
+	var radius := sim.balance.intersection_radius
+	var inside: Array[Array] = []
+	for car in sim.cars:
+		if not car.on_road:
+			continue
+		var length := RoadNetwork.lane_length(car.lane_from(), car.lane_to())
+		if (car.lane_to() == center and car.s > length - radius + 0.001) 				or (car.lane_from() == center and car.s < radius - 0.001):
+			inside.append([car.lock_from, car.lock_to])
+	return inside
+
+
+func _run_cross(junction: RoadNetwork.Junction) -> Dictionary:
 	var sim := _sim(CROSS_MAP, {"cars_per_house": 3, "pin_interval": 0.3})
 	_build_cross(sim)
-	var center := Vector2i(3, 3)
-	var radius := sim.balance.intersection_radius
+	sim.network.lights_left = 1
+	sim.network.roundabouts_left = 1
+	if junction != RoadNetwork.Junction.NONE:
+		assert_eq(sim.place_control(Vector2i(3, 3), junction), RoadNetwork.Result.OK)
+	var conflicts := 0
 	var max_inside := 0
-	for i in 30 * Simulation.TICK_RATE:
+	for i in 40 * Simulation.TICK_RATE:
 		sim.tick()
-		var inside := 0
-		for car in sim.cars:
-			if not car.on_road:
-				continue
-			var length := RoadNetwork.lane_length(car.lane_from(), car.lane_to())
-			if (car.lane_to() == center and car.s > length - radius + 0.001) \
-					or (car.lane_from() == center and car.s < radius - 0.001):
-				inside += 1
-		max_inside = maxi(max_inside, inside)
-	assert_eq(max_inside, 1, "в зоне перекрёстка не больше одной машины")
-	assert_gt(sim.score, 10, "перекрёсток не должен вставать намертво")
+		var inside := _cars_inside(sim, Vector2i(3, 3))
+		max_inside = maxi(max_inside, inside.size())
+		for a in inside.size():
+			for b in range(a + 1, inside.size()):
+				if Traffic.movements_conflict(Vector2i(3, 3), inside[a], inside[b]):
+					conflicts += 1
+	return {"score": sim.score, "conflicts": conflicts, "max_inside": max_inside}
+
+
+func test_intersection_never_lets_conflicting_cars_together() -> void:
+	var result := _run_cross(RoadNetwork.Junction.NONE)
+	assert_eq(result["conflicts"], 0, "пересекающиеся траектории не должны быть на перекрёстке вместе")
+	assert_gt(result["score"], 10, "перекрёсток не должен вставать намертво")
+
+
+func test_light_never_lets_conflicting_cars_together() -> void:
+	var result := _run_cross(RoadNetwork.Junction.LIGHT)
+	assert_eq(result["conflicts"], 0)
+	assert_gt(result["score"], 10)
+
+
+func test_roundabout_respects_capacity_and_flows() -> void:
+	var result := _run_cross(RoadNetwork.Junction.ROUNDABOUT)
+	assert_true(result["max_inside"] <= 3)
+	assert_gt(result["score"], 10)
+
+
+func test_motorway_carries_cars() -> void:
+	var sim := _sim(LINE_MAP)
+	sim.network.motorways_left = 1
+	assert_eq(sim.build_link(Vector2i(0, 0), Vector2i(0, 1)), RoadNetwork.Result.OK)
+	assert_eq(sim.build_motorway(Vector2i(0, 1), Vector2i(3, 1)), RoadNetwork.Result.OK)
+	assert_eq(sim.build_link(Vector2i(3, 1), Vector2i(4, 0)), RoadNetwork.Result.OK)
+	_run(sim, 10.0)
+	assert_gt(sim.score, 0)
 
 
 func test_game_over_when_destination_overflows() -> void:

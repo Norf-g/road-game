@@ -1,13 +1,40 @@
 {
-	"start_tiles": 60,
-	"start_bridges": 2,
+	"start_tiles": 30,
+	"start_bridges": 1,
+	"bridge_max_length": 4,
+
 	"cars_per_house": 1,
 	"car_speed": 2.0,
 	"car_gap": 0.4,
 	"intersection_radius": 0.3,
+	"yield_time": 0.4,
+	"light_phase_time": 4.0,
+	"roundabout_capacity": 3,
 	"parking_time": 1.0,
+
+	"motorway_max_length": 10.0,
+	"motorway_speed": 2.0,
+
 	"pin_interval": 7.0,
+	"pin_interval_decay": 0.93,
+	"pin_interval_min": 2.5,
 	"overflow_pins": 5,
 	"overflow_time": 20.0,
-	"overflow_recovery": 0.5
+	"overflow_recovery": 0.5,
+
+	"week_seconds": 60.0,
+	"week_tiles": 15,
+	"upgrade_tiles": 20,
+	"upgrade_bridges": 2,
+
+	"color_weeks": [0, 1, 3, 5, 7, 10],
+	"houses_per_new_color": 2,
+	"house_interval": 10.0,
+	"house_interval_decay": 0.92,
+	"house_interval_min": 4.0,
+	"destination_every_weeks": 3,
+	"spawn_distance_start": 5.0,
+	"spawn_distance_growth": 0.7,
+	"spawn_distance_max": 14.0,
+	"cluster_chance": 0.6
 }

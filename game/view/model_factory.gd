@@ -40,6 +40,49 @@ static func destination(color: Color) -> Node3D:
 	return root
 
 
+## Въезд места назначения: тёмный проём, выступающий из угла здания.
+static func gate() -> Node3D:
+	var root := Node3D.new()
+	var mesh := BoxMesh.new()
+	mesh.size = Vector3(0.36, 0.3, 0.36)
+	root.add_child(_part(mesh, Palette.ROAD, mesh.size.y / 2))
+	return root
+
+
+## Светофор: столбик в углу перекрёстка с жёлтым фонарём.
+static func traffic_light() -> Node3D:
+	var root := Node3D.new()
+	var post_mesh := CylinderMesh.new()
+	post_mesh.top_radius = 0.04
+	post_mesh.bottom_radius = 0.04
+	post_mesh.height = 0.45
+	var post := _part(post_mesh, Palette.LIGHT_POST, post_mesh.height / 2)
+	post.position += Vector3(0.36, 0.0, 0.36)
+	root.add_child(post)
+	var lamp_mesh := BoxMesh.new()
+	lamp_mesh.size = Vector3(0.12, 0.16, 0.12)
+	var lamp := _part(lamp_mesh, Palette.LIGHT_LAMP, post_mesh.height + lamp_mesh.size.y / 2)
+	lamp.position += Vector3(0.36, 0.0, 0.36)
+	root.add_child(lamp)
+	return root
+
+
+## Развязка: кольцо дороги вокруг зелёного островка.
+static func roundabout() -> Node3D:
+	var root := Node3D.new()
+	var ring_mesh := CylinderMesh.new()
+	ring_mesh.top_radius = 0.42
+	ring_mesh.bottom_radius = 0.42
+	ring_mesh.height = 0.03
+	root.add_child(_part(ring_mesh, Palette.ROUNDABOUT_RING, 0.03))
+	var island_mesh := CylinderMesh.new()
+	island_mesh.top_radius = 0.18
+	island_mesh.bottom_radius = 0.18
+	island_mesh.height = 0.08
+	root.add_child(_part(island_mesh, Palette.ROUNDABOUT_ISLAND, 0.06))
+	return root
+
+
 static func _part(mesh: Mesh, color: Color, height: float) -> MeshInstance3D:
 	var part := MeshInstance3D.new()
 	part.mesh = mesh
