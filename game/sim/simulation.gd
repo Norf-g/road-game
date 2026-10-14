@@ -51,7 +51,7 @@ func _init(map: MapData, game_balance: Balance, seed_value: int) -> void:
 func add_house(cell: Vector2i, color: int) -> House:
 	var house := House.new(houses.size(), cell, color)
 	houses.append(house)
-	network.add_terminal(cell)
+	network.add_terminal(cell, 1)
 	for i in balance.cars_per_house:
 		cars.append(Car.new(cars.size(), house))
 	return house
@@ -86,6 +86,16 @@ func build_link(a: Vector2i, b: Vector2i) -> RoadNetwork.Result:
 	if game_over:
 		return RoadNetwork.Result.BLOCKED
 	var result := network.build(a, b)
+	if result == RoadNetwork.Result.OK:
+		_on_network_changed()
+	return result
+
+
+## Переносит единственный выезд дома house_cell на связь с клеткой to.
+func relink_house(house_cell: Vector2i, to: Vector2i) -> RoadNetwork.Result:
+	if game_over:
+		return RoadNetwork.Result.BLOCKED
+	var result := network.relink_terminal(house_cell, to)
 	if result == RoadNetwork.Result.OK:
 		_on_network_changed()
 	return result

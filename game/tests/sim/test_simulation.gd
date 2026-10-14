@@ -183,3 +183,16 @@ func test_same_seed_and_commands_give_same_game() -> void:
 		_run(sim, 10.0)
 		hashes.append(sim.state_hash())
 	assert_eq(hashes[0], hashes[1])
+
+
+func test_road_cannot_pass_through_connected_house() -> void:
+	# Второй дом в (0, 1) пытается подключиться через первый, уже подключённый дом (0, 0).
+	var sim := _sim(LINE_MAP)
+	sim.add_house(Vector2i(0, 1), 0)
+	_build_line(sim)
+	assert_eq(sim.build_link(Vector2i(0, 1), Vector2i(0, 0)), RoadNetwork.Result.TERMINAL_FULL)
+	assert_eq(sim.build_link(Vector2i(0, 1), Vector2i(1, 0)), RoadNetwork.Result.OK, "своим выездом — можно")
+	_run(sim, 15.0)
+	assert_eq(sim.cars[1].home.cell, Vector2i(0, 1))
+	assert_true(sim.score >= 2, "оба дома возят заказы")
+

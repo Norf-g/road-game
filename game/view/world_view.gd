@@ -25,6 +25,7 @@ var _fog_area := Rect2i()
 var _preview := MeshInstance3D.new()
 var _cars := MultiMeshInstance3D.new()
 var _houses_shown := 0
+var _house_models: Array[Node3D] = []
 var _destinations_shown := 0
 var _pin_markers: Array = []  # для каждого места назначения — Array[MeshInstance3D]
 var _overflow_bars: Array[MeshInstance3D] = []
@@ -54,6 +55,7 @@ func _process(_delta: float) -> void:
 		_road_version = network.version
 		_roads.mesh = _road_mesh()
 		_rebuild_junctions()
+		_turn_houses_to_exits()
 	if network.bounds != _fog_area:
 		_fog_area = network.bounds
 		_fog.mesh = _fog_mesh()
@@ -181,8 +183,11 @@ func _rebuild_junctions() -> void:
 func _show_new_buildings() -> void:
 	while _houses_shown < _sim.houses.size():
 		var house := _sim.houses[_houses_shown]
-		_pop_in(ModelFactory.house(Palette.building(house.color)), cell_center(house.cell))
+		var model := ModelFactory.house(Palette.building(house.color))
+		_house_models.append(model)
+		_pop_in(model, cell_center(house.cell))
 		_houses_shown += 1
+		_turn_houses_to_exits()
 	while _destinations_shown < _sim.destinations.size():
 		var dest := _sim.destinations[_destinations_shown]
 		var center := Vector3(dest.rect.get_center().x, 0.0, dest.rect.get_center().y)
@@ -196,6 +201,16 @@ func _show_new_buildings() -> void:
 		_pop_in(model, center)
 		_build_pin_markers(dest)
 		_destinations_shown += 1
+
+
+## Каждый подключённый дом смотрит дверью на свой единственный выезд.
+func _turn_houses_to_exits() -> void:
+	for i in _house_models.size():
+		var cell := _sim.houses[i].cell
+		var links := _sim.network.links_of(cell)
+		if not links.is_empty():
+			var dir: Vector2i = links[0] - cell
+			_house_models[i].rotation.y = atan2(dir.x, dir.y)
 
 
 func _pop_in(model: Node3D, at: Vector3) -> void:

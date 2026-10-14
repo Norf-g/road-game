@@ -14,12 +14,19 @@ static func flat_material(color: Color) -> StandardMaterial3D:
 	return _materials[color]
 
 
-## Дом на одну клетку: коробка и двускатная крыша.
+## Дом на одну клетку: коробка, двускатная крыша и дверь. Дверь смотрит в сторону +Z —
+## отображение поворачивает дом дверью к его выезду.
 static func house(color: Color) -> Node3D:
 	var root := Node3D.new()
 	var body_mesh := BoxMesh.new()
 	body_mesh.size = Vector3(0.6, 0.35, 0.6)
 	root.add_child(_part(body_mesh, color, body_mesh.size.y / 2))
+
+	var door_mesh := BoxMesh.new()
+	door_mesh.size = Vector3(0.18, 0.22, 0.04)
+	var door := _part(door_mesh, Palette.ROAD, door_mesh.size.y / 2)
+	door.position.z = body_mesh.size.z / 2 + door_mesh.size.z / 2
+	root.add_child(door)
 
 	var roof_mesh := PrismMesh.new()
 	roof_mesh.size = Vector3(0.7, 0.25, 0.6)

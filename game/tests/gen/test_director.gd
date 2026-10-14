@@ -44,10 +44,11 @@ func test_buildings_appear_on_free_land_inside_area() -> void:
 	var sim: Simulation = game[0]
 	var director: Director = game[1]
 	_run(sim, director, 25.0)
-	var area := director.area()
+	var area := director.spawn_area()
+	assert_eq(area, director.area().grow(-1), "отступ от края — одна клетка")
 	var taken := {}
 	for house in sim.houses:
-		assert_true(area.has_point(house.cell), "дом вне видимой части карты")
+		assert_true(area.has_point(house.cell), "дом вне видимой части карты или у самого края")
 		assert_false(sim.network.is_water(house.cell), "дом на воде")
 		assert_false(taken.has(house.cell), "два дома в одной клетке")
 		taken[house.cell] = true

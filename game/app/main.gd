@@ -22,6 +22,7 @@ const RESULT_MESSAGES := {
 	RoadNetwork.Result.NOT_CONNECTED: "MSG_NOT_CONNECTED",
 	RoadNetwork.Result.BRIDGE_SHAPE: "MSG_BRIDGE_SHAPE",
 	RoadNetwork.Result.BRIDGE_TOO_LONG: "MSG_BRIDGE_TOO_LONG",
+	RoadNetwork.Result.TERMINAL_FULL: "MSG_HOUSE_CONNECTED",
 }
 
 var _sim: Simulation

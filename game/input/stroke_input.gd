@@ -3,7 +3,8 @@ extends Node
 ## Касание одним пальцем. Что оно делает, зависит от выбранного инструмента:
 ## - Дорога: ведение пальцем строит дорогу от дома, здания или уже построенной дороги. Если палец
 ##   начал на пустом месте, стройка начнётся, когда он дойдёт до дома или дороги. С любой клетки
-##   здания дорога начинается от его въезда. Траектория сглаживается: соседняя клетка принимается,
+##   здания дорога начинается от его въезда. Если начать с уже подключённого дома, его единственный
+##   выезд переносится на новую дорогу. Траектория сглаживается: соседняя клетка принимается,
 ##   только когда палец дошёл до её середины, поэтому по диагонали дорога идёт без «ступенек».
 ## - Ластик: ведение пальцем сносит всё на пути.
 ## - Шоссе: ведём от начала до конца, шоссе строится, когда палец отпущен.
@@ -23,7 +24,7 @@ const INNER_RADIUS := 0.4
 ## дорога уже есть) — обычное дело при рисовании.
 const ROAD_FAILURES: Array[RoadNetwork.Result] = [
 	RoadNetwork.Result.NO_TILES, RoadNetwork.Result.NO_BRIDGES, RoadNetwork.Result.CROSSING,
-	RoadNetwork.Result.BRIDGE_SHAPE, RoadNetwork.Result.BRIDGE_TOO_LONG,
+	RoadNetwork.Result.BRIDGE_SHAPE, RoadNetwork.Result.BRIDGE_TOO_LONG, RoadNetwork.Result.TERMINAL_FULL,
 ]
 
 var tool: Tool = Tool.ROAD
@@ -37,6 +38,8 @@ var _active := false
 var _last_cell := Vector2i.ZERO
 ## Дорога уже привязана к сети: найдена клетка, от которой можно строить.
 var _anchored := false
+## Дорога начата с подключённого дома: первая связь переносит его выезд.
+var _relink_house := false
 var _motorway_start := Vector2i.ZERO
 
 
@@ -73,6 +76,7 @@ func _begin(screen_pos: Vector2) -> void:
 	_active = true
 	_last_cell = cell
 	_anchored = false
+	_relink_house = false
 	if tool == Tool.ROAD:
 		_try_anchor(cell)
 
@@ -108,7 +112,12 @@ func _continue_road(screen_pos: Vector2, cell: Vector2i) -> void:
 		# Клетки здания (кроме въезда) палец проходит насквозь: дорога идёт от въезда.
 		if sim.network.is_building(next) and not sim.network.is_terminal(next):
 			continue
-		var result := sim.build_link(_last_cell, next)
+		var result: RoadNetwork.Result
+		if _relink_house:
+			_relink_house = false
+			result = sim.relink_house(_last_cell, next)
+		else:
+			result = sim.build_link(_last_cell, next)
 		if result in ROAD_FAILURES:
 			action_failed.emit(result)
 		_last_cell = next
@@ -138,6 +147,7 @@ func _try_anchor(cell: Vector2i) -> void:
 		_anchored = true
 	elif sim.network.is_road(cell) or sim.network.is_terminal(cell):
 		_anchored = true
+		_relink_house = sim.network.is_single_exit(cell) and not sim.network.links_of(cell).is_empty()
 
 
 func _report(result: RoadNetwork.Result) -> void:

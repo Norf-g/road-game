@@ -189,3 +189,54 @@ func test_diagonal_cannot_cut_river_corner() -> void:
 	# Суша (0, 0) и (1, 1), вода в двух других углах.
 	var net := _network([".~", "~."], 10, 1)
 	assert_eq(net.build(Vector2i(0, 0), Vector2i(1, 1)), RoadNetwork.Result.BLOCKED)
+
+
+func test_house_has_only_one_exit() -> void:
+	var net := _network([".....", "....."], 10, 1, false)
+	net.add_terminal(Vector2i(2, 0), 1)
+	net.add_terminal(Vector2i(0, 0))
+	assert_eq(net.build(Vector2i(0, 0), Vector2i(1, 0)), OK)
+	assert_eq(net.build(Vector2i(1, 0), Vector2i(2, 0)), OK, "дом подключается к дороге")
+	assert_eq(net.build(Vector2i(2, 0), Vector2i(3, 0)), RoadNetwork.Result.TERMINAL_FULL, "второй выезд из дома")
+	assert_eq(net.build(Vector2i(1, 1), Vector2i(2, 0)), RoadNetwork.Result.TERMINAL_FULL)
+	assert_eq(net.build(Vector2i(2, 0), Vector2i(1, 0)), RoadNetwork.Result.ALREADY_LINKED)
+	assert_true(net.erase(Vector2i(1, 0)))
+	assert_eq(net.build(Vector2i(2, 0), Vector2i(3, 0)), OK, "после сноса дорога ведёт в другую сторону")
+
+
+func test_two_houses_can_be_linked() -> void:
+	var net := _network(["...."], 10, 1, false)
+	net.add_terminal(Vector2i(0, 0), 1)
+	net.add_terminal(Vector2i(1, 0), 1)
+	assert_eq(net.build(Vector2i(0, 0), Vector2i(1, 0)), OK)
+
+
+func test_house_exit_can_be_moved_to_new_road() -> void:
+	var net := _network([".....", "....."], 10, 1, false)
+	net.add_terminal(Vector2i(2, 0), 1)
+	assert_eq(net.build(Vector2i(2, 0), Vector2i(1, 0)), OK)
+	assert_eq(net.relink_terminal(Vector2i(2, 0), Vector2i(3, 0)), OK)
+	assert_eq(net.links_of(Vector2i(2, 0)), [Vector2i(3, 0)])
+	assert_true(net.is_road(Vector2i(1, 0)), "старая дорога остаётся")
+	assert_eq(net.relink_terminal(Vector2i(2, 0), Vector2i(3, 0)), RoadNetwork.Result.ALREADY_LINKED)
+
+
+func test_failed_relink_keeps_old_exit() -> void:
+	var net := _network([".....", "....."], 1, 1, false)
+	net.add_terminal(Vector2i(2, 0), 1)
+	assert_eq(net.build(Vector2i(2, 0), Vector2i(1, 0)), OK)
+	assert_eq(net.relink_terminal(Vector2i(2, 0), Vector2i(3, 0)), RoadNetwork.Result.NO_TILES)
+	assert_eq(net.links_of(Vector2i(2, 0)), [Vector2i(1, 0)])
+
+
+func test_relink_does_not_lose_neighbor_light_on_failure() -> void:
+	# Дом (1, 1) — четвёртая ветка перекрёстка (1, 0) со светофором.
+	var net := _network(["...", "..."], 2, 1, true)
+	net.add_terminal(Vector2i(1, 1), 1)
+	for pair: Array in [[Vector2i(0, 0), Vector2i(1, 0)], [Vector2i(1, 0), Vector2i(2, 0)], [Vector2i(1, 0), Vector2i(1, 1)]]:
+		assert_eq(net.build(pair[0], pair[1]), OK)
+	net.lights_left = 1
+	assert_eq(net.place_control(Vector2i(1, 0), RoadNetwork.Junction.LIGHT), OK)
+	assert_eq(net.relink_terminal(Vector2i(1, 1), Vector2i(0, 1)), RoadNetwork.Result.NO_TILES)
+	assert_eq(net.control_at(Vector2i(1, 0)), RoadNetwork.Junction.LIGHT)
+

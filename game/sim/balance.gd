@@ -25,7 +25,7 @@ var roundabout_capacity := 3
 var parking_time := 1.0
 
 # --- Шоссе ---
-var motorway_max_length := 10.0
+var motorway_max_length := 30.0
 var motorway_speed := 2.0
 
 # --- Заказы и проигрыш ---
@@ -64,6 +64,8 @@ var destination_every_weeks := 3
 var spawn_distance_start := 5.0
 var spawn_distance_growth := 0.7
 var spawn_distance_max := 14.0
+## Отступ зданий от края видимой части карты, в клетках.
+var spawn_edge_margin := 1
 ## Вероятность, что новый дом встанет рядом с домом того же цвета, а не в новом месте.
 var cluster_chance := 0.6
 

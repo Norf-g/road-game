@@ -4,6 +4,8 @@ extends RefCounted
 ## Обычные связи соединяют соседние клетки (8 направлений). Шоссе соединяет две далёкие клетки
 ## поверх всего, и по нему едут быстрее.
 ## Входы зданий — «терминалы»: в них можно въехать и из них выехать, но нельзя проехать насквозь.
+## У дома ровно один выезд: подключённый дом новых связей не принимает, но выезд можно перенести
+## на новую дорогу (relink_terminal).
 ## Клетки на воде — мосты: они не тратят клетки дорог, а каждый пролёт тратит один мост. Мост —
 ## прямой отрезок без поворотов и развилок, не длиннее bridge_max_length клеток.
 ## Новая дорога всегда продолжает сеть: одна из клеток связи уже должна быть дорогой или входом здания.
@@ -12,6 +14,7 @@ extends RefCounted
 enum Result {
 	OK, OUT_OF_BOUNDS, NOT_ADJACENT, BLOCKED, ALREADY_LINKED, CROSSING, NO_TILES, NO_BRIDGES,
 	NOT_INTERSECTION, OCCUPIED, NO_STOCK, TOO_LONG, NOT_CONNECTED, BRIDGE_SHAPE, BRIDGE_TOO_LONG,
+	TERMINAL_FULL,
 }
 enum Junction { NONE, LIGHT, ROUNDABOUT }
 
@@ -25,7 +28,7 @@ var bridge_max_length := 4
 var lights_left := 0
 var roundabouts_left := 0
 var motorways_left := 0
-var motorway_max_length := 10.0
+var motorway_max_length := 30.0
 ## Во сколько раз быстрее обычной дороги едут по шоссе.
 var motorway_speed: float:
 	get:
@@ -37,7 +40,7 @@ var version := 0
 
 var _water: Dictionary = {}      # Vector2i -> true
 var _blocked: Dictionary = {}    # клетки зданий, где нельзя строить
-var _terminals: Dictionary = {}  # входы зданий
+var _terminals: Dictionary = {}  # вход здания -> сколько связей он принимает (0 — сколько угодно)
 var _roads: Dictionary = {}      # клетки дорог и мостов
 var _links: Dictionary = {}      # Vector2i -> Array[Vector2i]
 var _motorways: Dictionary = {}  # Vector4i (пара клеток по порядку) -> true
@@ -93,8 +96,9 @@ func path_cost(path: Array[Vector2i]) -> float:
 	return total
 
 
-func add_terminal(cell: Vector2i) -> void:
-	_terminals[cell] = true
+## Вход здания. max_links — сколько связей он принимает; 0 — без ограничений.
+func add_terminal(cell: Vector2i, max_links := 0) -> void:
+	_terminals[cell] = max_links
 	_ensure_point(cell)
 	_astar.set_point_disabled(grid.index_of(cell), true)
 
@@ -177,7 +181,7 @@ func can_build(a: Vector2i, b: Vector2i) -> Result:
 	var d := b - a
 	if a == b or absi(d.x) > 1 or absi(d.y) > 1:
 		return Result.NOT_ADJACENT
-	if _blocked.has(a) or _blocked.has(b) or (_terminals.has(a) and _terminals.has(b)):
+	if _blocked.has(a) or _blocked.has(b):
 		return Result.BLOCKED
 	if are_linked(a, b):
 		return Result.ALREADY_LINKED
@@ -187,6 +191,8 @@ func can_build(a: Vector2i, b: Vector2i) -> Result:
 		return Result.CROSSING
 	if not _is_anchor(a) and not _is_anchor(b):
 		return Result.NOT_CONNECTED
+	if _is_full(a) or _is_full(b):
+		return Result.TERMINAL_FULL
 	# Диагональ между клетками суши не может «срезать» угол реки.
 	if d.x != 0 and d.y != 0 and _water.has(corner_a) and _water.has(corner_b) 			and not _water.has(a) and not _water.has(b):
 		return Result.BLOCKED
@@ -220,6 +226,32 @@ func build(a: Vector2i, b: Vector2i) -> Result:
 	_recount_bridges()
 	version += 1
 	return Result.OK
+
+
+## Переносит выезд здания terminal на связь с клеткой b: старые связи здания снимаются (дороги
+## остаются), новая строится по обычным правилам. Если новую связь построить нельзя, всё остаётся как было.
+func relink_terminal(terminal: Vector2i, b: Vector2i) -> Result:
+	if not _terminals.has(terminal):
+		return Result.NOT_CONNECTED
+	if are_linked(terminal, b):
+		return Result.ALREADY_LINKED
+	var old: Array = links_of(terminal).duplicate()
+	# Проверка на время без старых связей; светофоры соседей при этом не трогаем.
+	for neighbor: Vector2i in old:
+		_unlink(terminal, neighbor, false)
+	var check := can_build(terminal, b)
+	for neighbor: Vector2i in old:
+		_link(terminal, neighbor)
+	if check != Result.OK:
+		return check
+	for neighbor: Vector2i in old:
+		_unlink(terminal, neighbor)
+	return build(terminal, b)
+
+
+## Вход здания, который принимает только одну связь (дом).
+func is_single_exit(cell: Vector2i) -> bool:
+	return _terminals.get(cell, 0) == 1
 
 
 func can_build_motorway(a: Vector2i, b: Vector2i) -> Result:
@@ -307,6 +339,12 @@ func find_path(from: Vector2i, to: Vector2i) -> Array[Vector2i]:
 	return path
 
 
+## Вход здания, который уже принял все связи, какие мог.
+func _is_full(cell: Vector2i) -> bool:
+	var max_links: int = _terminals.get(cell, 0)
+	return max_links > 0 and links_of(cell).size() >= max_links
+
+
 func _is_anchor(cell: Vector2i) -> bool:
 	return _roads.has(cell) or _terminals.has(cell)
 
@@ -383,7 +421,7 @@ func _link(a: Vector2i, b: Vector2i) -> void:
 	_astar.connect_points(grid.index_of(a), grid.index_of(b))
 
 
-func _unlink(a: Vector2i, b: Vector2i) -> void:
+func _unlink(a: Vector2i, b: Vector2i, drop_controls := true) -> void:
 	for pair: Array in [[a, b], [b, a]]:
 		var links: Array = _links.get(pair[0], [])
 		links.erase(pair[1])
@@ -394,6 +432,8 @@ func _unlink(a: Vector2i, b: Vector2i) -> void:
 		_astar.motorway_ids.erase(_id_pair(a, b))
 		motorways_left += 1
 	# Перекрёсток, который перестал быть перекрёстком, возвращает светофор или развязку в запас.
+	if not drop_controls:
+		return
 	for cell in [a, b]:
 		if _controls.has(cell) and not is_intersection(cell):
 			_remove_control(cell)

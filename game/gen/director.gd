@@ -2,6 +2,7 @@ class_name Director
 extends RefCounted
 ## Модуль генерации («директор»): решает, что, где и когда появляется в городе, и ведёт игровые недели.
 ## - Цвета появляются по неделям из color_weeks: место назначения и несколько домов сразу.
+## - Здания ставятся с отступом spawn_edge_margin от края видимой части карты.
 ## - Дома появляются всё чаще: рядом с домами того же цвета или на растущем расстоянии
 ##   от места назначения своего цвета.
 ## - Раз в несколько недель — ещё одно место назначения знакомого цвета.
@@ -48,6 +49,11 @@ func week_progress() -> float:
 
 func area() -> Rect2i:
 	return _sim.network.bounds
+
+
+## Где можно ставить здания: видимая часть карты без полосы у края.
+func spawn_area() -> Rect2i:
+	return area().grow(-_balance.spawn_edge_margin)
 
 
 func choose(index: int) -> void:
@@ -133,7 +139,7 @@ func _neediest_color() -> int:
 ## Вход — одна из клеток здания, рядом с которой снаружи есть свободная суша.
 func _spawn_destination(color: int) -> Destination:
 	var network := _sim.network
-	var area := area()
+	var area := spawn_area()
 	var candidates: Array[Rect2i] = []
 	for y in range(area.position.y, area.end.y - 1):
 		for x in range(area.position.x, area.end.x - 1):
@@ -186,7 +192,7 @@ func _spawn_house(color: int) -> House:
 ## Свободные клетки суши, не вплотную к местам назначения (чтобы не закрыть им въезд).
 func _free_cells() -> Array[Vector2i]:
 	var network := _sim.network
-	var area := area()
+	var area := spawn_area()
 	var cells: Array[Vector2i] = []
 	for y in range(area.position.y, area.end.y):
 		for x in range(area.position.x, area.end.x):

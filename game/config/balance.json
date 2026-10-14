@@ -12,7 +12,7 @@
 	"roundabout_capacity": 3,
 	"parking_time": 1.0,
 
-	"motorway_max_length": 10.0,
+	"motorway_max_length": 30.0,
 	"motorway_speed": 2.0,
 
 	"pin_interval": 7.0,
@@ -36,5 +36,6 @@
 	"spawn_distance_start": 5.0,
 	"spawn_distance_growth": 0.7,
 	"spawn_distance_max": 14.0,
+	"spawn_edge_margin": 1,
 	"cluster_chance": 0.6
 }
