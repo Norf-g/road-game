@@ -15,6 +15,8 @@ enum Tool { ROAD, ERASER, MOTORWAY, LIGHT, ROUNDABOUT }
 
 ## Действие не удалось по причине, которую стоит показать игроку.
 signal action_failed(result: RoadNetwork.Result)
+## Действие удалось: «build» — построено, «erase» — снесено. Для звука.
+signal action_succeeded(event: String)
 ## Предпросмотр шоссе: valid — получится ли его построить.
 signal motorway_preview_changed(from: Vector2i, to: Vector2i, valid: bool)
 signal motorway_preview_hidden
@@ -69,7 +71,7 @@ func _begin(screen_pos: Vector2) -> void:
 			_report(sim.place_control(cell, junction))
 			return
 		Tool.ERASER:
-			sim.erase_cell(cell)
+			_erase(cell)
 		Tool.MOTORWAY:
 			_motorway_start = cell
 			motorway_preview_changed.emit(cell, cell, false)
@@ -88,7 +90,7 @@ func _continue(screen_pos: Vector2) -> void:
 	match tool:
 		Tool.ERASER:
 			for next in Grid.line(_last_cell, cell):
-				sim.erase_cell(next)
+				_erase(next)
 			_last_cell = cell
 		Tool.MOTORWAY:
 			_last_cell = cell
@@ -118,7 +120,9 @@ func _continue_road(screen_pos: Vector2, cell: Vector2i) -> void:
 			result = sim.relink_house(_last_cell, next)
 		else:
 			result = sim.build_link(_last_cell, next)
-		if result in ROAD_FAILURES:
+		if result == RoadNetwork.Result.OK:
+			action_succeeded.emit("build")
+		elif result in ROAD_FAILURES:
 			action_failed.emit(result)
 		_last_cell = next
 
@@ -150,8 +154,15 @@ func _try_anchor(cell: Vector2i) -> void:
 		_relink_house = sim.network.is_single_exit(cell) and not sim.network.links_of(cell).is_empty()
 
 
+func _erase(cell: Vector2i) -> void:
+	if sim.erase_cell(cell):
+		action_succeeded.emit("erase")
+
+
 func _report(result: RoadNetwork.Result) -> void:
-	if result != RoadNetwork.Result.OK and result != RoadNetwork.Result.ALREADY_LINKED:
+	if result == RoadNetwork.Result.OK:
+		action_succeeded.emit("build")
+	elif result != RoadNetwork.Result.ALREADY_LINKED:
 		action_failed.emit(result)
 
 

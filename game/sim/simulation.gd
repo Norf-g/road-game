@@ -80,6 +80,20 @@ func destination_at(cell: Vector2i) -> Destination:
 	return null
 
 
+## Связан ли дом дорогами хотя бы с одним местом назначения своего цвета. Несвязанный дом «спит».
+func is_house_served(house: House) -> bool:
+	for dest in destinations:
+		if dest.color == house.color and _route(house, dest).size() >= 2:
+			return true
+	return false
+
+
+## Место назначения в тревоге: заказов набралось warning_ratio от порога переполнения
+## или уже идёт таймер переполнения.
+func is_destination_warning(dest: Destination) -> bool:
+	return dest.overflow > 0.0 or dest.pins >= balance.warning_ratio * balance.overflow_pins
+
+
 # --- Команды -----------------------------------------------------------------
 
 func build_link(a: Vector2i, b: Vector2i) -> RoadNetwork.Result:
@@ -165,9 +179,6 @@ func _spawn_pins() -> void:
 
 ## Назначает на необслуженные заказы свободные машины того же цвета — ближайшие по дорогам.
 func _dispatch() -> void:
-	if _routes_version != network.version:
-		_routes.clear()
-		_routes_version = network.version
 	for dest in destinations:
 		while dest.pins > dest.claimed:
 			var best: Car = null
@@ -193,6 +204,9 @@ func _dispatch() -> void:
 
 
 func _route(house: House, dest: Destination) -> Array[Vector2i]:
+	if _routes_version != network.version:
+		_routes.clear()
+		_routes_version = network.version
 	var key := Vector2i(house.id, dest.id)
 	if not _routes.has(key):
 		_routes[key] = network.find_path(house.cell, dest.entrance)

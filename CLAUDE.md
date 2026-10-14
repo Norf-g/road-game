@@ -3,7 +3,7 @@
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
 ## Проект
-Мобильная игра под Android по мотивам Mini Motorways: игрок прокладывает дороги в растущем городе. Все продуктовые решения и правила собраны в [docs/gdd.md](docs/gdd.md); читай его перед изменениями геймплея. Текущий этап разработки указан в разделе «Этапы» дизайн-документа.
+«Город дорог» (City of Roads) — мобильная игра под Android по мотивам Mini Motorways: игрок прокладывает дороги в растущем городе. Все продуктовые решения и правила собраны в [docs/gdd.md](docs/gdd.md); читай его перед изменениями геймплея. Текущий этап разработки указан в разделе «Этапы» дизайн-документа.
 
 Код пишет Claude, пользователь проверяет и тестирует на Xiaomi 15 (Android 16, HyperOS). Общение и комментарии в коде — на русском, идентификаторы — на английском.
 
@@ -31,12 +31,12 @@ $GODOT --headless --path game -s addons/gut/gut_cmdln.gd
 $GODOT --headless --path game -s addons/gut/gut_cmdln.gd -gtest=res://tests/sim/test_grid.gd
 $GODOT --headless --path game -s addons/gut/gut_cmdln.gd -gtest=res://tests/sim/test_grid.gd -gunit_test_name=test_in_bounds
 
-# Отладочный APK -> build/road-game-debug.apk
-$GODOT --headless --path game --export-debug "Android" ../build/road-game-debug.apk
+# Отладочный APK -> build/city-of-roads-debug.apk
+$GODOT --headless --path game --export-debug "Android" ../build/city-of-roads-debug.apk
 
 # Установка и запуск на телефоне, просмотр логов
-$ADB install -r build/road-game-debug.apk
-$ADB shell monkey -p dev.roadgame.prototype -c android.intent.category.LAUNCHER 1
+$ADB install -r build/city-of-roads-debug.apk
+$ADB shell monkey -p ru.norf.cityofroads -c android.intent.category.LAUNCHER 1
 $ADB logcat -s godot
 ```
 
@@ -59,9 +59,20 @@ $ADB logcat -s godot
 - GDScript пишем со статической типизацией.
 - Туннелей и гор в игре нет: через реку — только мосты.
 
-## Графика
-3D-модели строятся кодом. Gemini делает только 2D: иконки, интерфейс, графику для магазина, текстуры. С этапа 3 шаблоны запросов, описание стиля и список нужных картинок лежат в `art/`, обработка картинок — скрипты в `tools/`.
+## Графика и звук
+3D-модели строятся кодом (`game/view/model_factory.gd`). Gemini делает только 2D: иконки, эмблему, иконку приложения, баннер магазина. Стиль и палитра — [art/styleguide.md](art/styleguide.md); палитра продублирована в `game/view/palette.gd`, меняются вместе.
+
+```bash
+# Конвейер картинок (Pillow в tools/.venv): список и запросы — art/manifest.json
+tools/.venv/Scripts/python.exe tools/art.py prompts   # собрать art/prompts/*.md
+tools/.venv/Scripts/python.exe tools/art.py status
+tools/.venv/Scripts/python.exe tools/art.py process   # art/inbox/<id>.png -> game/assets/...
+```
+
+- `art/prompts/*.md` генерируются из манифеста — правки вносим в `art/manifest.json`.
+- Интерфейс работает без картинок: если иконки нет, кнопка показывает текст (`Hud.icon()`).
+- Звуки: соответствие «событие → файлы» — в `game/app/audio.gd`; музыка подхватывается из `game/assets/audio/music/theme.*`.
 
 ## Рабочий процесс
 - Каждый шаг заканчивается сборкой на телефоне. Коммит в `main` и push в `origin` делаются только после того, как пользователь проверил шаг на телефоне и одобрил его. Отдельных веток нет.
-- Магазин — RuStore. Ключ подписи для выпуска пользователь создаёт сам, в репозиторий он не попадает (`*.keystore`/`*.jks` в `.gitignore`). Имя пакета `dev.roadgame.prototype` временное.
+- Магазин — RuStore. Ключ подписи для выпуска пользователь создаёт сам, в репозиторий он не попадает (`*.keystore`/`*.jks` в `.gitignore`). Имя пакета — `ru.norf.cityofroads`, после первой публикации его менять нельзя.

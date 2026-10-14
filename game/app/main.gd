@@ -31,6 +31,8 @@ var _world: WorldView
 var _camera: CameraController
 var _input := StrokeInput.new()
 var _hud := Hud.new()
+var _audio := Audio.new()
+var _edge_alerts := EdgeAlerts.new()
 var _speed := 1
 var _accumulator := 0.0
 var _game_over_shown := false
@@ -40,8 +42,17 @@ var _area := Rect2i()
 
 func _ready() -> void:
 	_build_environment()
+	add_child(_audio)
+	var alerts_layer := CanvasLayer.new()  # под интерфейсом, над картой
+	alerts_layer.add_child(_edge_alerts)
+	add_child(alerts_layer)
+	_hud.layer = 2
 	add_child(_hud)
 	add_child(_input)
+	_hud.set_muted(_audio.muted)
+	_hud.sound_toggled.connect(_audio.set_muted)
+	_hud.button_clicked.connect(_audio.play.bind("click"))
+	_input.action_succeeded.connect(_audio.play)
 	_input.is_over_ui = _hud.is_point_over_ui
 	_input.action_failed.connect(_on_action_failed)
 	_input.motorway_preview_changed.connect(func(from: Vector2i, to: Vector2i, valid: bool) -> void:
@@ -58,6 +69,7 @@ func _process(delta: float) -> void:
 	if _director.has_offer():
 		if not _offer_shown:
 			_offer_shown = true
+			_audio.play("week_end")
 			_hud.show_offer(_director.week, _director.offer, _sim.balance)
 		_accumulator = 0.0
 	else:
@@ -76,6 +88,7 @@ func _process(delta: float) -> void:
 	_hud.update_stats(_sim, _director)
 	if _sim.game_over and not _game_over_shown:
 		_game_over_shown = true
+		_audio.play("game_over")
 		var is_new_record := Records.submit(_sim.score)
 		_hud.show_game_over(_sim.score, Records.best_score(), is_new_record)
 
@@ -98,6 +111,8 @@ func _start_game() -> void:
 	_area = Rect2i()
 	_input.sim = _sim
 	_input.camera = _camera
+	_edge_alerts.sim = _sim
+	_edge_alerts.camera = _camera
 	_input.tool = StrokeInput.Tool.ROAD
 	_speed = 1
 	_accumulator = 0.0
@@ -129,6 +144,7 @@ func _return_to_road_when_out_of_stock() -> void:
 
 
 func _on_upgrade_chosen(index: int) -> void:
+	_audio.play("upgrade")
 	_director.choose(index)
 	_offer_shown = false
 

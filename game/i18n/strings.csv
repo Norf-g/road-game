@@ -37,3 +37,5 @@ MSG_NOT_CONNECTED,"Начните от дома, здания или дорог�
 MSG_BRIDGE_SHAPE,Мост должен быть прямым
 MSG_BRIDGE_TOO_LONG,Мост слишком длинный
 MSG_HOUSE_CONNECTED,У дома только один выезд
+SOUND_ON,Звук
+SOUND_OFF,Тихо

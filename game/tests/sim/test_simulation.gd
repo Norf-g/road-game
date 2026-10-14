@@ -196,3 +196,25 @@ func test_road_cannot_pass_through_connected_house() -> void:
 	assert_eq(sim.cars[1].home.cell, Vector2i(0, 1))
 	assert_true(sim.score >= 2, "оба дома возят заказы")
 
+
+func test_house_sleeps_until_connected() -> void:
+	var sim := _sim(LINE_MAP)
+	var house: House = sim.houses[0]
+	assert_false(sim.is_house_served(house))
+	_build_line(sim)
+	assert_true(sim.is_house_served(house))
+	sim.erase_cell(Vector2i(2, 0))
+	assert_false(sim.is_house_served(house))
+
+
+func test_destination_warns_at_seventy_percent() -> void:
+	var sim := _sim(LINE_MAP, {"overflow_pins": 5, "warning_ratio": 0.7})
+	var dest: Destination = sim.destinations[0]
+	dest.pins = 3
+	assert_false(sim.is_destination_warning(dest))
+	dest.pins = 4
+	assert_true(sim.is_destination_warning(dest))
+	dest.pins = 0
+	dest.overflow = 0.1
+	assert_true(sim.is_destination_warning(dest), "идёт таймер переполнения")
+
