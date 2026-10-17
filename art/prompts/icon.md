@@ -21,7 +21,7 @@ Subject: A short straight road segment seen from above, with a dashed center lin
 ```
 Minimalist flat vector UI icon. Clean geometric shapes with rounded corners and one uniform stroke width. Single solid color #3A3A40 (dark graphite) only: no other colors, no gradients, no shadows, no texture, no outlines of a different color. No text, no letters, no numbers. The icon is centered and occupies about 70% of the canvas. Perfectly flat solid magenta #FF00FF background filling the whole image, with nothing else on it. Square 1:1.
 
-Subject: A classic rectangular eraser tilted 45 degrees.
+Subject: A classic rubber eraser tilted 45 degrees: a rectangle with rounded corners, split across its width by a thin gap into a short end and a longer body, with two short parallel motion strokes behind it showing the erasing movement. Make it clearly recognizable as an eraser, not a plain rectangle.
 ```
 
 ## tool_motorway

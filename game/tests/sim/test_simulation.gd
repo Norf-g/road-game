@@ -22,6 +22,7 @@ func _sim(map: Dictionary, overrides := {}, seed_value := 1) -> Simulation:
 	var balance := {
 		"start_tiles": 50, "cars_per_house": 1, "car_speed": 2.0, "parking_time": 0.5,
 		"pin_interval": 1.0, "overflow_pins": 100, "overflow_time": 1000.0,
+		"destination_start_delay": 0.0,
 	}
 	balance.merge(overrides, true)
 	return Simulation.new(MapData.from_dict(map), Balance.from_dict(balance), seed_value)
@@ -217,4 +218,13 @@ func test_destination_warns_at_seventy_percent() -> void:
 	dest.pins = 0
 	dest.overflow = 0.1
 	assert_true(sim.is_destination_warning(dest), "идёт таймер переполнения")
+
+
+func test_new_destination_waits_before_first_order() -> void:
+	var sim := _sim(LINE_MAP, {"pin_interval": 1.0, "destination_start_delay": 7.0})
+	var dest: Destination = sim.destinations[0]
+	_run(sim, 6.9)
+	assert_eq(dest.pins, 0, "первые 7 секунд место назначения машин не требует")
+	_run(sim, 0.2)
+	assert_eq(dest.pins, 1, "первый заказ — сразу после задержки")
 

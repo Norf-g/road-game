@@ -8,9 +8,10 @@ extends Node3D
 const ROAD_WIDTH := 0.5
 const ROAD_HEIGHT := 0.02
 const FOG_HEIGHT := 0.04
-const MOTORWAY_HEIGHT := 0.35
+## Эстакада выше любой крыши: дома ~0.6, купол места назначения ~0.95.
+const MOTORWAY_HEIGHT := 1.2
 ## Длина съезда шоссе с земли на эстакаду.
-const MOTORWAY_RAMP := 1.0
+const MOTORWAY_RAMP := 1.6
 const CAR_SIZE := Vector3(0.2, 0.12, 0.3)
 const MAX_PIN_MARKERS := 8
 const PIN_SIZE := 0.18
@@ -27,6 +28,8 @@ var _junctions := Node3D.new()
 var _fog := MeshInstance3D.new()
 var _fog_area := Rect2i()
 var _preview := MeshInstance3D.new()
+## Пульсирующее кольцо вокруг выбранного для правки конца шоссе.
+var _end_marker := MeshInstance3D.new()
 var _cars := MultiMeshInstance3D.new()
 var _houses_shown := 0
 var _house_models: Array[Node3D] = []
@@ -55,6 +58,16 @@ func setup(sim: Simulation) -> void:
 		flat.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 		add_child(flat)
 	add_child(_junctions)
+	var ring := TorusMesh.new()
+	ring.inner_radius = 0.3
+	ring.outer_radius = 0.42
+	var ring_material := StandardMaterial3D.new()
+	ring_material.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	ring_material.albedo_color = Palette.ACCENT
+	ring.material = ring_material
+	_end_marker.mesh = ring
+	_end_marker.visible = false
+	add_child(_end_marker)
 	_tree_trunks.multimesh = _tree_multimesh(ModelFactory.tree_trunk_mesh(), Palette.TREE_TRUNK)
 	_tree_crowns.multimesh = _tree_multimesh(ModelFactory.tree_crown_mesh(), Palette.TREE_CROWN)
 	add_child(_tree_trunks)
@@ -73,6 +86,9 @@ func _process(_delta: float) -> void:
 		_fog_area = network.bounds
 		_fog.mesh = _fog_mesh()
 	_show_new_buildings()
+	if _end_marker.visible:
+		var pulse := 1.0 + 0.12 * sin(Time.get_ticks_msec() / 1000.0 * TAU * 1.2)
+		_end_marker.scale = Vector3(pulse, 1.0, pulse)
 	_update_trees()
 	_update_cars()
 	_update_destinations()
@@ -91,6 +107,13 @@ func show_motorway_preview(from: Vector2i, to: Vector2i, valid: bool) -> void:
 
 func hide_motorway_preview() -> void:
 	_preview.visible = false
+
+
+## Подсвечивает выбранный для правки конец шоссе (Vector2i) или снимает подсветку (null).
+func show_end_selection(cell: Variant) -> void:
+	_end_marker.visible = cell != null
+	if cell != null:
+		_end_marker.position = cell_center(cell) + Vector3.UP * 0.06
 
 
 func _build_terrain() -> void:
@@ -254,8 +277,7 @@ func _sleep_label() -> Label3D:
 	label.pixel_size = 0.01
 	label.modulate = Palette.TEXT
 	label.outline_modulate = Palette.LAND
-	if ResourceLoader.exists(Hud.FONT_PATH):
-		label.font = load(Hud.FONT_PATH)
+	label.font = UiTheme.font()
 	label.visible = false
 	return label
 

@@ -14,7 +14,8 @@
   в нужный размер с отступом;
 - фон «opaque»: картинка обрезается по центру до нужных пропорций и уменьшается;
 - «recolor_dark» у выхода: тёмные (графитовые) части перекрашиваются в заданный цвет — так иконки
-  для тёмных кнопок становятся белыми, а акцентный цвет иконок улучшений остаётся.
+  для тёмных кнопок становятся белыми, а цветной акцент иконок улучшений остаётся. Серые и белые
+  детали внутри глифа (разметка дороги, лампы светофора) становятся прорезями, иначе слились бы с белым.
 
 Запускать из корня репозитория интерпретатором tools/.venv (там установлен Pillow).
 """
@@ -38,8 +39,10 @@ KEY_INNER = 60.0
 KEY_OUTER = 140.0
 DEFAULT_PADDING = 0.06
 
-# Пиксели темнее этой яркости (0..255) считаются графитовыми и перекрашиваются по recolor_dark.
-DARK_LUMA = 110
+# recolor_dark: пиксели темнее DARK_LUMA (0..255) — графитовый глиф, перекрашиваются; более светлые
+# серые (насыщенность ниже GREY_SATURATION) — прорези; насыщенные цветные — акцент, остаются.
+DARK_LUMA = 85
+GREY_SATURATION = 40
 
 # Фон адаптивной иконки Android — ровный цвет земли из палитры.
 ICON_BACKGROUND = {"path": "game/assets/app/icon_background_432.png", "size": (432, 432), "color": "#F4EFE6"}
@@ -109,6 +112,12 @@ def cmd_status(manifest: dict) -> None:
     print(f"\nГотово {done} из {len(manifest['items'])}")
 
 
+def _pixels(image: Image.Image):
+    """Пиксели построчно; в Pillow 12+ getdata устарела."""
+    flattened = getattr(image, "get_flattened_data", None)
+    return flattened() if flattened else image.getdata()
+
+
 def background_color(image: Image.Image) -> tuple[int, int, int]:
     """Медианный цвет полосы в несколько пикселей по краю картинки."""
     rgb = image.convert("RGB")
@@ -130,7 +139,7 @@ def key_out(image: Image.Image) -> Image.Image:
     source = image.convert("RGB")
     result = Image.new("RGBA", source.size)
     out = []
-    for r, g, b in source.getdata():
+    for r, g, b in _pixels(source):
         distance = ((r - bg[0]) ** 2 + (g - bg[1]) ** 2 + (b - bg[2]) ** 2) ** 0.5
         alpha = min(max((distance - KEY_INNER) / (KEY_OUTER - KEY_INNER), 0.0), 1.0)
         if alpha <= 0.0:
@@ -177,9 +186,12 @@ def fit_opaque(image: Image.Image, size: tuple[int, int]) -> Image.Image:
 def recolor_dark(image: Image.Image, color: str) -> Image.Image:
     target = Image.new("RGB", (1, 1), color).getpixel((0, 0))
     out = []
-    for r, g, b, a in image.getdata():
-        if a and 0.299 * r + 0.587 * g + 0.114 * b < DARK_LUMA:
+    for r, g, b, a in _pixels(image):
+        luma = 0.299 * r + 0.587 * g + 0.114 * b
+        if a and luma < DARK_LUMA:
             out.append((*target, a))
+        elif a and max(r, g, b) - min(r, g, b) < GREY_SATURATION:
+            out.append((0, 0, 0, 0))
         else:
             out.append((r, g, b, a))
     result = Image.new("RGBA", image.size)

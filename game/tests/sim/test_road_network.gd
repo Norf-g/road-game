@@ -240,3 +240,99 @@ func test_relink_does_not_lose_neighbor_light_on_failure() -> void:
 	assert_eq(net.relink_terminal(Vector2i(1, 1), Vector2i(0, 1)), RoadNetwork.Result.NO_TILES)
 	assert_eq(net.control_at(Vector2i(1, 0)), RoadNetwork.Junction.LIGHT)
 
+
+func _motorway_net() -> RoadNetwork:
+	var net := _network(["............", "............"], 10, 1, false)
+	net.motorways_left = 1
+	assert_eq(net.build_motorway(Vector2i(0, 0), Vector2i(6, 0)), OK)
+	return net
+
+
+func test_motorway_end_can_be_moved() -> void:
+	var net := _motorway_net()
+	assert_eq(net.motorway_partner(Vector2i(6, 0)), Vector2i(0, 0))
+	assert_eq(net.move_motorway_end(Vector2i(0, 0), Vector2i(6, 0), Vector2i(9, 1)), OK)
+	assert_true(net.is_motorway(Vector2i(0, 0), Vector2i(9, 1)))
+	assert_false(net.is_road(Vector2i(6, 0)), "старый конец без других дорог убран")
+	assert_eq(net.tiles_left, 8, "клетка старого конца вернулась, новая потрачена")
+	assert_eq(net.motorways_left, 0, "перенос не тратит запас шоссе")
+
+
+func test_moved_end_keeps_player_road() -> void:
+	var net := _motorway_net()
+	assert_eq(net.build(Vector2i(6, 0), Vector2i(7, 0)), OK)
+	assert_eq(net.move_motorway_end(Vector2i(0, 0), Vector2i(6, 0), Vector2i(6, 1)), OK)
+	assert_true(net.is_road(Vector2i(6, 0)), "от старого конца начинается дорога игрока — клетка остаётся")
+	assert_false(net.is_motorway(Vector2i(0, 0), Vector2i(6, 0)))
+
+
+func test_invalid_move_changes_nothing() -> void:
+	var net := _motorway_net()
+	net.motorway_max_length = 8.0
+	assert_eq(net.plan_motorway_move(Vector2i(0, 0), Vector2i(6, 0), Vector2i(11, 0))["result"], RoadNetwork.Result.TOO_LONG)
+	assert_eq(net.move_motorway_end(Vector2i(0, 0), Vector2i(6, 0), Vector2i(11, 0)), RoadNetwork.Result.TOO_LONG)
+	assert_true(net.is_motorway(Vector2i(0, 0), Vector2i(6, 0)))
+	assert_eq(net.tiles_left, 8)
+	assert_eq(net.motorways_left, 0)
+
+
+## Дорога по строке 2 от входа здания (0, 2) до (8, 2).
+func _road_net() -> RoadNetwork:
+	var net := _network(["..........", "..........", "..........", "..........", ".........."], 30, 1, false)
+	net.add_terminal(Vector2i(0, 2))
+	for x in 8:
+		assert_eq(net.build(Vector2i(x, 2), Vector2i(x + 1, 2)), OK)
+	net.motorways_left = 1
+	return net
+
+
+func test_motorway_attaches_beside_road() -> void:
+	var net := _road_net()
+	# Шоссе ведут из середины дороги (4, 2) к дальней точке (9, 4).
+	var plan := net.plan_motorway(Vector2i(4, 2), Vector2i(9, 4))
+	assert_eq(plan["result"], OK)
+	var start: Vector2i = plan["ends"][0]
+	assert_ne(start, Vector2i(4, 2), "конец шоссе не встаёт на саму дорогу")
+	assert_eq(plan["attach"][0], Vector2i(4, 2))
+	assert_eq(net.build_motorway_planned(Vector2i(4, 2), Vector2i(9, 4)), OK)
+	assert_true(net.is_motorway(start, Vector2i(9, 4)))
+	assert_true(net.are_linked(start, Vector2i(4, 2)), "конец подключён к дороге сбоку")
+	assert_eq(net.links_of(Vector2i(4, 2)).size(), 3)
+
+
+func test_motorway_takes_free_side_of_intersection() -> void:
+	var net := _road_net()
+	assert_eq(net.build(Vector2i(4, 2), Vector2i(4, 1)), OK)
+	assert_eq(net.build(Vector2i(4, 2), Vector2i(4, 3)), OK)
+	# Перекрёсток (4, 2): заняты запад, восток, север, юг — шоссе займёт свободную диагональ.
+	assert_eq(net.build_motorway_planned(Vector2i(4, 2), Vector2i(9, 4)), OK)
+	var start: Variant = null
+	for cell: Vector2i in net.links_of(Vector2i(4, 2)):
+		if net.motorway_partner(cell) != null:
+			start = cell
+	assert_not_null(start)
+	assert_eq(maxi(absi(start.x - 4), absi(start.y - 2)), 1)
+	assert_ne(start.x, 4, "не на занятой северной/южной стороне")
+
+
+func test_motorway_without_room_is_refused() -> void:
+	var net := _network(["~~~~~~~~", "~......~", "~~~~~~~~"], 30, 1, false)
+	net.add_terminal(Vector2i(1, 1))
+	for x in range(1, 6):
+		assert_eq(net.build(Vector2i(x, 1), Vector2i(x + 1, 1)), OK)
+	net.motorways_left = 1
+	assert_eq(net.plan_motorway(Vector2i(3, 1), Vector2i(6, 1))["result"], RoadNetwork.Result.NO_ROOM)
+
+
+func test_moving_attached_end_cleans_old_stub() -> void:
+	var net := _road_net()
+	assert_eq(net.build_motorway_planned(Vector2i(4, 2), Vector2i(9, 4)), OK)
+	var start: Vector2i = Vector2i.ZERO
+	for cell: Vector2i in net.links_of(Vector2i(4, 2)):
+		if net.motorway_partner(cell) != null:
+			start = cell
+	var tiles := net.tiles_left
+	assert_eq(net.move_motorway_end(Vector2i(9, 4), start, Vector2i(1, 4)), OK)
+	assert_false(net.is_road(start), "заглушка старого конца у дороги убрана")
+	assert_eq(net.links_of(Vector2i(4, 2)).size(), 2)
+	assert_eq(net.tiles_left, tiles, "одна клетка вернулась, одна потрачена")

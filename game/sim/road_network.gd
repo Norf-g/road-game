@@ -14,7 +14,7 @@ extends RefCounted
 enum Result {
 	OK, OUT_OF_BOUNDS, NOT_ADJACENT, BLOCKED, ALREADY_LINKED, CROSSING, NO_TILES, NO_BRIDGES,
 	NOT_INTERSECTION, OCCUPIED, NO_STOCK, TOO_LONG, NOT_CONNECTED, BRIDGE_SHAPE, BRIDGE_TOO_LONG,
-	TERMINAL_FULL,
+	TERMINAL_FULL, NO_ROOM,
 }
 enum Junction { NONE, LIGHT, ROUNDABOUT }
 
@@ -279,12 +279,125 @@ func build_motorway(a: Vector2i, b: Vector2i) -> Result:
 	if check != Result.OK:
 		return check
 	_add_roads([a, b])
+	_link_motorway(a, b)
+	version += 1
+	return Result.OK
+
+
+## Второй конец шоссе, у которого один конец в клетке end; null — если в клетке нет конца шоссе.
+func motorway_partner(end: Vector2i) -> Variant:
+	for neighbor: Vector2i in links_of(end):
+		if is_motorway(end, neighbor):
+			return neighbor
+	return null
+
+
+## План шоссе к клеткам from_target и to_target. Концы шоссе — всегда новые клетки дороги:
+## если игрок ведёт шоссе на существующую дорогу или перекрёсток, конец встаёт на свободную клетку
+## рядом (сторону, ближайшую ко второму концу) и подключается к этой дороге обычной связью.
+## Возвращает {result, ends: [Vector2i, Vector2i], attach: [дорога или null, дорога или null]}.
+func plan_motorway(from_target: Vector2i, to_target: Vector2i) -> Dictionary:
+	var first := _resolve_end(from_target, to_target, null)
+	if first["result"] != Result.OK:
+		return first
+	var second := _resolve_end(to_target, first["end"], first["end"])
+	if second["result"] != Result.OK:
+		return second
+	return {
+		"result": can_build_motorway(first["end"], second["end"]),
+		"ends": [first["end"], second["end"]],
+		"attach": [first["attach"], second["attach"]],
+	}
+
+
+## Строит шоссе по плану plan_motorway: само шоссе и связи его концов с дорогами сбоку.
+func build_motorway_planned(from_target: Vector2i, to_target: Vector2i) -> Result:
+	var plan := plan_motorway(from_target, to_target)
+	if plan["result"] != Result.OK:
+		return plan["result"]
+	build_motorway(plan["ends"][0], plan["ends"][1])
+	for i in 2:
+		if plan["attach"][i] != null:
+			build(plan["ends"][i], plan["attach"][i])
+	return Result.OK
+
+
+## План переноса конца шоссе fixed—old_end к клетке target — по тем же правилам, что новое шоссе,
+## но без запаса шоссе; клетка старого конца вернётся в запас, если станет ненужной.
+## Возвращает {result, end, attach}.
+func plan_motorway_move(fixed: Vector2i, old_end: Vector2i, target: Vector2i) -> Dictionary:
+	if not is_motorway(fixed, old_end):
+		return {"result": Result.NOT_CONNECTED}
+	if target == old_end:
+		return {"result": Result.ALREADY_LINKED}
+	# Проверка на время без старого шоссе; светофоры при этом не трогаем.
+	_unlink(fixed, old_end, false)
+	var refund := 1 if _is_disposable_end(old_end) else 0
+	tiles_left += refund
+	var plan := _resolve_end(target, fixed, fixed)
+	if plan["result"] == Result.OK:
+		plan["result"] = can_build_motorway(fixed, plan["end"])
+	tiles_left -= refund
+	_link_motorway(fixed, old_end)
+	return plan
+
+
+## Переносит конец шоссе fixed—old_end к клетке target. Если нельзя — всё остаётся как было.
+func move_motorway_end(fixed: Vector2i, old_end: Vector2i, target: Vector2i) -> Result:
+	var plan := plan_motorway_move(fixed, old_end, target)
+	if plan["result"] != Result.OK:
+		return plan["result"]
+	_unlink(fixed, old_end, false)
+	if _is_disposable_end(old_end):
+		erase(old_end)
+	build_motorway(fixed, plan["end"])
+	if plan["attach"] != null:
+		build(plan["end"], plan["attach"])
+	return Result.OK
+
+
+## Где встанет конец шоссе, которое ведут к клетке target со стороны клетки toward:
+## на свободной суше — в ней самой; на дороге — на свободной соседней клетке, ближайшей к toward,
+## со связью к этой дороге. Клетку avoid (второй конец) не занимаем. Возвращает {result, end, attach}.
+func _resolve_end(target: Vector2i, toward: Vector2i, avoid: Variant) -> Dictionary:
+	if not bounds.has_point(target):
+		return {"result": Result.OUT_OF_BOUNDS}
+	if _is_free_land_for_end(target) and target != avoid:
+		return {"result": Result.OK, "end": target, "attach": null}
+	if not _roads.has(target) or _water.has(target):
+		return {"result": Result.BLOCKED}
+	var sides := grid.neighbors8(target).filter(func(cell: Vector2i) -> bool:
+		return cell != avoid and _is_free_land_for_end(cell))
+	sides.sort_custom(func(x: Vector2i, y: Vector2i) -> bool:
+		return Vector2(x).distance_squared_to(Vector2(toward)) < Vector2(y).distance_squared_to(Vector2(toward)))
+	for side: Vector2i in sides:
+		if can_build(side, target) == Result.OK:
+			return {"result": Result.OK, "end": side, "attach": target}
+	return {"result": Result.NO_ROOM}
+
+
+func _is_free_land_for_end(cell: Vector2i) -> bool:
+	return bounds.has_point(cell) and not _water.has(cell) and not _roads.has(cell) \
+		and not _terminals.has(cell) and not _blocked.has(cell)
+
+
+## Клетка старого конца шоссе (уже без самого шоссе) никому не нужна: к ней ничего не подходит,
+## или это «заглушка» сбоку от дороги — единственная связь ведёт в середину дороги или перекрёсток.
+## Если от конца начинается дорога, которую провёл игрок, клетка остаётся.
+func _is_disposable_end(end: Vector2i) -> bool:
+	if not _roads.has(end):
+		return false
+	var links := links_of(end)
+	if links.is_empty():
+		return true
+	return links.size() == 1 and not _terminals.has(links[0]) and links_of(links[0]).size() >= 3
+
+
+func _link_motorway(a: Vector2i, b: Vector2i) -> void:
 	_motorways[_pair_key(a, b)] = true
 	_astar.motorway_ids[_id_pair(a, b)] = true
 	_link(a, b)
 	motorways_left -= 1
-	version += 1
-	return Result.OK
 
 
 func place_control(cell: Vector2i, control: Junction) -> Result:

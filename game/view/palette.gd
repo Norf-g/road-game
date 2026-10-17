@@ -4,7 +4,7 @@ extends RefCounted
 
 ## Цвета домов и мест назначения. Красного среди них нет: красный — только цвет тревоги.
 const BUILDINGS: Array[Color] = [
-	Color("f0883e"), Color("4d8fd1"), Color("f2b33d"), Color("4fb286"), Color("9572c9"), Color("e883b0"),
+	Color("8e5b3a"), Color("4d8fd1"), Color("f2b33d"), Color("4fb286"), Color("9572c9"), Color("e883b0"),
 ]
 const LAND := Color("f4efe6")
 ## Всё, что за пределами видимой части карты, — цвет фона.

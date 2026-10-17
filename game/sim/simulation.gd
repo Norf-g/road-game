@@ -59,8 +59,8 @@ func add_house(cell: Vector2i, color: int) -> House:
 
 func add_destination(rect: Rect2i, entrance: Vector2i, color: int) -> Destination:
 	var dest := Destination.new(destinations.size(), rect, entrance, color)
-	# Первые заказы у разных мест назначения появляются не одновременно.
-	dest.pin_timer = rng.randf() * pin_interval
+	# Новое место назначения сначала «открывается»: первый заказ — через destination_start_delay секунд.
+	dest.pin_timer = pin_interval - balance.destination_start_delay
 	destinations.append(dest)
 	for y in range(rect.position.y, rect.end.y):
 		for x in range(rect.position.x, rect.end.x):
@@ -118,7 +118,21 @@ func relink_house(house_cell: Vector2i, to: Vector2i) -> RoadNetwork.Result:
 func build_motorway(a: Vector2i, b: Vector2i) -> RoadNetwork.Result:
 	if game_over:
 		return RoadNetwork.Result.BLOCKED
-	var result := network.build_motorway(a, b)
+	var result := network.build_motorway_planned(a, b)
+	if result == RoadNetwork.Result.OK:
+		_on_network_changed()
+	return result
+
+
+## Переносит конец шоссе из клетки old_end к клетке new_end (на дороге — встаёт сбоку);
+## второй конец остаётся на месте.
+func move_motorway_end(old_end: Vector2i, new_end: Vector2i) -> RoadNetwork.Result:
+	if game_over:
+		return RoadNetwork.Result.BLOCKED
+	var fixed: Variant = network.motorway_partner(old_end)
+	if fixed == null:
+		return RoadNetwork.Result.NOT_CONNECTED
+	var result := network.move_motorway_end(fixed, old_end, new_end)
 	if result == RoadNetwork.Result.OK:
 		_on_network_changed()
 	return result

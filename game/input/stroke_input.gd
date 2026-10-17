@@ -9,6 +9,9 @@ extends Node
 ## - Ластик: ведение пальцем сносит всё на пути.
 ## - Шоссе: ведём от начала до конца, шоссе строится, когда палец отпущен.
 ## - Светофор, развязка: касание по перекрёстку.
+## Правка шоссе (инструменты «Дорога» и «Шоссе»): короткое касание конца шоссе выбирает его; затем
+## ведение пальцем от выбранного конца переносит его, когда палец отпущен. Касание в другом месте
+## только снимает выбор.
 ## На ПК левая кнопка мыши работает как палец (emulate_touch_from_mouse).
 
 enum Tool { ROAD, ERASER, MOTORWAY, LIGHT, ROUNDABOUT }
@@ -20,16 +23,26 @@ signal action_succeeded(event: String)
 ## Предпросмотр шоссе: valid — получится ли его построить.
 signal motorway_preview_changed(from: Vector2i, to: Vector2i, valid: bool)
 signal motorway_preview_hidden
+## Выбран конец шоссе для правки (Vector2i) или выбор снят (null).
+signal motorway_end_selected(cell: Variant)
 
 const INNER_RADIUS := 0.4
 ## При ведении дороги игроку важны только эти причины отказа, остальные (здание на пути,
 ## дорога уже есть) — обычное дело при рисовании.
 const ROAD_FAILURES: Array[RoadNetwork.Result] = [
 	RoadNetwork.Result.NO_TILES, RoadNetwork.Result.NO_BRIDGES, RoadNetwork.Result.CROSSING,
-	RoadNetwork.Result.BRIDGE_SHAPE, RoadNetwork.Result.BRIDGE_TOO_LONG, RoadNetwork.Result.TERMINAL_FULL,
+	RoadNetwork.Result.BRIDGE_SHAPE, RoadNetwork.Result.BRIDGE_TOO_LONG,
 ]
+## Попытка провести дорогу через подключённый дом молча ничего не делает — это не ошибка игрока.
+const SILENT_RESULTS: Array[RoadNetwork.Result] = [RoadNetwork.Result.ALREADY_LINKED, RoadNetwork.Result.TERMINAL_FULL]
+## Инструменты, в которых касание конца шоссе выбирает его для правки.
+const EDIT_TOOLS: Array[Tool] = [Tool.ROAD, Tool.MOTORWAY]
 
-var tool: Tool = Tool.ROAD
+## Смена инструмента снимает выбор конца шоссе.
+var tool: Tool = Tool.ROAD:
+	set(value):
+		tool = value
+		_select_end(null)
 var sim: Simulation
 var camera: CameraController
 ## (Vector2) -> bool: точка экрана над кнопками интерфейса.
@@ -43,6 +56,19 @@ var _anchored := false
 ## Дорога начата с подключённого дома: первая связь переносит его выезд.
 var _relink_house := false
 var _motorway_start := Vector2i.ZERO
+## Клетка, где палец коснулся экрана, и уходил ли он с неё — чтобы отличить касание от ведения.
+var _press_cell := Vector2i.ZERO
+var _moved := false
+## Выбранный для правки конец шоссе (Vector2i) или null.
+var _selected_end: Variant = null
+## Палец ведёт выбранный конец шоссе на новое место.
+var _editing := false
+
+
+## Начало новой партии: никаких незавершённых действий и выбора.
+func reset() -> void:
+	_cancel()
+	_select_end(null)
 
 
 func _unhandled_input(event: InputEvent) -> void:
@@ -62,9 +88,22 @@ func _unhandled_input(event: InputEvent) -> void:
 
 
 func _begin(screen_pos: Vector2) -> void:
-	if sim.game_over or is_over_ui.call(screen_pos):
+	if sim == null or is_over_ui.call(screen_pos) or sim.game_over:
 		return
 	var cell := _cell_at(screen_pos)
+	if _selected_end != null:
+		# Шоссе могли снести, пока его конец был выбран.
+		var partner: Variant = sim.network.motorway_partner(_selected_end)
+		if cell == _selected_end and tool in EDIT_TOOLS and partner != null:
+			_editing = true
+			_active = true
+			_last_cell = cell
+			motorway_preview_changed.emit(partner, cell, false)
+		else:
+			_select_end(null)  # касание в другом месте только снимает выбор
+		return
+	_press_cell = cell
+	_moved = false
 	match tool:
 		Tool.LIGHT, Tool.ROUNDABOUT:
 			var junction := RoadNetwork.Junction.LIGHT if tool == Tool.LIGHT else RoadNetwork.Junction.ROUNDABOUT
@@ -87,6 +126,17 @@ func _continue(screen_pos: Vector2) -> void:
 	var cell := _cell_at(screen_pos)
 	if cell == _last_cell:
 		return
+	_moved = true
+	if _editing:
+		_last_cell = cell
+		var fixed: Variant = sim.network.motorway_partner(_selected_end)
+		if fixed == null:
+			_cancel()
+			_select_end(null)
+			return
+		var move := sim.network.plan_motorway_move(fixed, _selected_end, cell)
+		motorway_preview_changed.emit(fixed, move.get("end", cell), move["result"] == RoadNetwork.Result.OK)
+		return
 	match tool:
 		Tool.ERASER:
 			for next in Grid.line(_last_cell, cell):
@@ -94,8 +144,10 @@ func _continue(screen_pos: Vector2) -> void:
 			_last_cell = cell
 		Tool.MOTORWAY:
 			_last_cell = cell
-			var valid := sim.network.can_build_motorway(_motorway_start, cell) == RoadNetwork.Result.OK
-			motorway_preview_changed.emit(_motorway_start, cell, valid)
+			# Предпросмотр там, где концы встанут на самом деле (на дороге — сбоку от неё).
+			var plan := sim.network.plan_motorway(_motorway_start, cell)
+			var ends: Array = plan.get("ends", [_motorway_start, cell])
+			motorway_preview_changed.emit(ends[0], ends[1], plan["result"] == RoadNetwork.Result.OK)
 		Tool.ROAD:
 			_continue_road(screen_pos, cell)
 
@@ -128,19 +180,37 @@ func _continue_road(screen_pos: Vector2, cell: Vector2i) -> void:
 
 
 func _finish(screen_pos: Vector2) -> void:
+	var end := _cell_at(screen_pos)
+	if _editing:
+		if end != _selected_end:
+			_report(sim.move_motorway_end(_selected_end, end))
+		_cancel()
+		_select_end(null)
+		return
+	# Короткое касание конца шоссе выбирает его для правки.
+	if not _moved and tool in EDIT_TOOLS and sim.network.motorway_partner(_press_cell) != null:
+		_cancel()
+		_select_end(_press_cell)
+		return
 	if tool == Tool.ROAD and not _anchored:
 		action_failed.emit(RoadNetwork.Result.NOT_CONNECTED)
-	if tool == Tool.MOTORWAY:
-		var end := _cell_at(screen_pos)
-		if end != _motorway_start:
-			_report(sim.build_motorway(_motorway_start, end))
+	if tool == Tool.MOTORWAY and end != _motorway_start:
+		_report(sim.build_motorway(_motorway_start, end))
 	_cancel()
 
 
 func _cancel() -> void:
-	if _active and tool == Tool.MOTORWAY:
+	if _active and (tool == Tool.MOTORWAY or _editing):
 		motorway_preview_hidden.emit()
 	_active = false
+	_editing = false
+
+
+func _select_end(cell: Variant) -> void:
+	if typeof(cell) == typeof(_selected_end) and cell == _selected_end:
+		return
+	_selected_end = cell
+	motorway_end_selected.emit(cell)
 
 
 ## Привязывает начало дороги: к дороге, дому или въезду здания (с любой его клетки).
@@ -162,7 +232,7 @@ func _erase(cell: Vector2i) -> void:
 func _report(result: RoadNetwork.Result) -> void:
 	if result == RoadNetwork.Result.OK:
 		action_succeeded.emit("build")
-	elif result != RoadNetwork.Result.ALREADY_LINKED:
+	elif result not in SILENT_RESULTS:
 		action_failed.emit(result)
 
 

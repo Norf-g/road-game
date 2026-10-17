@@ -41,7 +41,7 @@ Subject: A vertical traffic light with three round lamps. Accent color #4FB286 (
 ```
 Minimalist flat vector icon for an upgrade card in a mobile puzzle game. Clean geometric shapes with rounded corners and one uniform stroke width. Exactly two colors: dark graphite #3A3A40 for the main shape and the accent color named below for one highlighted part. No gradients, no shadows, no texture. No text, no letters, no numbers. The icon is centered and occupies about 70% of the canvas. Perfectly flat solid magenta #FF00FF background filling the whole image, with nothing else on it. Square 1:1.
 
-Subject: A roundabout seen from above: a ring road with four short arms around a round island. Accent color #F0883E (orange) for the island.
+Subject: A roundabout seen from above: a ring road with four short arms around a round island. Accent color #8E5B3A (brown) for the island.
 ```
 
 ## upgrade_motorway

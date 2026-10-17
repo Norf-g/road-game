@@ -118,3 +118,20 @@ func test_same_seed_same_city() -> void:
 	var other := _game(100)
 	_run(other[0], other[1], 35.0)
 	assert_ne((other[0] as Simulation).state_hash(), hashes[0], "другой seed — другой город")
+
+
+func test_color_waits_for_room_instead_of_being_skipped() -> void:
+	# Крошечная стартовая область: месту назначения второго цвета сначала негде встать.
+	var map := MapData.from_dict({
+		"rows": ["............", "............", "............", "............", "............", "............"],
+		"expansions": [{"week": 0, "rect": [0, 0, 5, 5]}, {"week": 2, "rect": [0, 0, 12, 6]}],
+	})
+	var balance := Balance.from_dict({"week_seconds": 10.0, "house_interval": 1.0, "color_weeks": [0, 1]})
+	var sim := Simulation.new(map, balance, 3)
+	var director := Director.new(sim, map)
+	_run(sim, director, 25.0)
+	var colors := {}
+	for dest in sim.destinations:
+		colors[dest.color] = true
+	assert_true(colors.has(1), "второй цвет появляется, когда для него находится место")
+

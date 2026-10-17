@@ -11,18 +11,19 @@ signal speed_selected(speed: int)
 signal sound_toggled(muted: bool)
 signal upgrade_chosen(index: int)
 signal restart_requested
+## Открыть главное меню (кнопка «Меню» в игре или «В меню» после проигрыша).
+signal menu_requested
 ## Нажата любая кнопка — для звука щелчка.
 signal button_clicked
 
-const FONT_PATH := "res://assets/fonts/Nunito.ttf"
-const FONT_WEIGHT := 700
-const FONT_SIZE := 30
 const BUTTON_SIZE := Vector2(150, 96)
-const ICON_SIZE := 56
 const STAT_ICON_SIZE := 40
 const UPGRADE_ICON_SIZE := 120
-const CORNER_RADIUS := 20
 const TOAST_SECONDS := 1.5
+const TOAST_FADE := 0.4
+## Откуда выезжает всплывающее сообщение и где останавливается (отступ сверху).
+const TOAST_FROM := -100.0
+const TOAST_TOP := 36.0
 ## Порядок кнопок на панели инструментов — порядок ключей: ластик крайний справа.
 const TOOL_KEYS := {
 	StrokeInput.Tool.ROAD: "TOOL_ROAD",
@@ -55,7 +56,7 @@ const UPGRADE_ICONS := {
 	Director.Upgrade.MOTORWAY: "upgrade_motorway",
 }
 
-var _theme := Theme.new()
+var _theme := UiTheme.get_theme()
 var _week := Label.new()
 var _week_progress := ProgressBar.new()
 var _tiles := Label.new()
@@ -64,8 +65,10 @@ var _score := Label.new()
 var _fps := Label.new()
 ## Подпись -> ключ перевода, если у строки нет иконки и число нужно подписать словами.
 var _stat_keys := {}
+var _toast_area := CenterContainer.new()
 var _toast := Label.new()
 var _toast_left := 0.0
+var _toast_tween: Tween
 var _buttons: Array[Button] = []
 var _speed_buttons: Array[Button] = []
 var _tool_buttons := {}  # StrokeInput.Tool -> Button
@@ -88,7 +91,6 @@ static func icon(id: String) -> Texture2D:
 
 
 func _ready() -> void:
-	_build_theme()
 	var root := MarginContainer.new()
 	root.theme = _theme
 	root.set_anchors_preset(Control.PRESET_FULL_RECT)
@@ -117,6 +119,9 @@ func _ready() -> void:
 	var spacer := _ignore(Control.new())
 	spacer.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	top.add_child(spacer)
+	var menu := _button(tr("MENU_BUTTON"), null)
+	menu.pressed.connect(menu_requested.emit)
+	top.add_child(menu)
 	_sound_button = _button("", null)
 	_sound_button.pressed.connect(func() -> void:
 		set_muted(not _muted)
@@ -131,9 +136,6 @@ func _ready() -> void:
 
 	var middle := _ignore(CenterContainer.new())
 	middle.size_flags_vertical = Control.SIZE_EXPAND_FILL
-	_toast.add_theme_font_size_override("font_size", 36)
-	_toast.add_theme_color_override("font_color", Palette.OVERFLOW)
-	middle.add_child(_toast)
 	column.add_child(middle)
 
 	var bottom := HBoxContainer.new()
@@ -148,6 +150,7 @@ func _ready() -> void:
 		_tool_buttons[tool] = button
 	column.add_child(bottom)
 
+	_build_toast()
 	_build_offer()
 	_build_game_over()
 	set_muted(false)
@@ -161,7 +164,7 @@ func reset() -> void:
 	_offer.visible = false
 	_game_over.visible = false
 	_toast_left = 0.0
-	_toast.text = ""
+	_toast_area.visible = false
 
 
 func select_tool(tool: StrokeInput.Tool) -> void:
@@ -185,6 +188,7 @@ func update_stats(sim: Simulation, director: Director) -> void:
 	_set_stat(_score, sim.score)
 	_fps.text = tr("HUD_FPS") % Engine.get_frames_per_second()
 	var stocks := {
+		StrokeInput.Tool.ROAD: network.tiles_left,
 		StrokeInput.Tool.MOTORWAY: network.motorways_left,
 		StrokeInput.Tool.LIGHT: network.lights_left,
 		StrokeInput.Tool.ROUNDABOUT: network.roundabouts_left,
@@ -193,12 +197,26 @@ func update_stats(sim: Simulation, director: Director) -> void:
 		var button: Button = _tool_buttons[tool]
 		var count := str(stocks[tool])
 		button.text = count if button.icon != null else "%s · %s" % [tr(TOOL_KEYS[tool]), count]
-		button.disabled = stocks[tool] == 0
+		# Иконка с числом запаса: иконка слева, число справа — иначе они накладываются.
+		button.icon_alignment = HORIZONTAL_ALIGNMENT_LEFT
+		# «Дорогу» не блокируем и без запаса: можно вести дорогу по мостам и переносить выезд дома.
+		button.disabled = stocks[tool] == 0 and tool != StrokeInput.Tool.ROAD
 
 
 func show_message(key: String) -> void:
 	_toast.text = tr(key)
 	_toast_left = TOAST_SECONDS
+	if _toast_area.visible and _toast_area.modulate.a > 0.0:
+		_toast_area.modulate.a = 1.0  # сообщение уже на экране — только меняем текст
+		return
+	if _toast_tween != null:
+		_toast_tween.kill()
+	_toast_area.visible = true
+	_toast_area.modulate.a = 0.0
+	_place_toast(TOAST_FROM)
+	_toast_tween = create_tween().set_parallel().set_trans(Tween.TRANS_CUBIC).set_ease(Tween.EASE_OUT)
+	_toast_tween.tween_method(_place_toast, TOAST_FROM, TOAST_TOP, 0.25)
+	_toast_tween.tween_property(_toast_area, "modulate:a", 1.0, 0.2)
 
 
 func show_offer(week: int, offer: Array[Director.Upgrade], balance: Balance) -> void:
@@ -233,48 +251,10 @@ func is_point_over_ui(screen_pos: Vector2) -> bool:
 func _process(delta: float) -> void:
 	if _toast_left > 0.0:
 		_toast_left -= delta
-		_toast.modulate.a = clampf(_toast_left / 0.5, 0.0, 1.0)
-
-
-func _build_theme() -> void:
-	if ResourceLoader.exists(FONT_PATH):
-		var font := FontVariation.new()
-		font.base_font = load(FONT_PATH)
-		font.variation_opentype = {TextServerManager.get_primary_interface().name_to_tag("weight"): FONT_WEIGHT}
-		_theme.default_font = font
-	_theme.default_font_size = FONT_SIZE
-	_theme.set_color("font_color", "Label", Palette.TEXT)
-	# Иконки кнопок белые (их перекрашивает tools/art.py), поэтому цвет иконки задаётся так же, как текст.
-	for state in ["font_color", "font_hover_color", "font_focus_color", "icon_normal_color", "icon_hover_color", "icon_focus_color"]:
-		_theme.set_color(state, "Button", Palette.BUTTON_TEXT)
-	for state in ["font_pressed_color", "font_hover_pressed_color", "icon_pressed_color", "icon_hover_pressed_color"]:
-		_theme.set_color(state, "Button", Palette.ACCENT)
-	_theme.set_color("font_disabled_color", "Button", Color(Palette.BUTTON_TEXT, 0.45))
-	_theme.set_color("icon_disabled_color", "Button", Color(Palette.BUTTON_TEXT, 0.4))
-	_theme.set_constant("icon_max_width", "Button", ICON_SIZE)
-	_theme.set_constant("h_separation", "Button", 8)
-	_theme.set_stylebox("normal", "Button", _style(Palette.BUTTON, 0))
-	_theme.set_stylebox("hover", "Button", _style(Palette.BUTTON_HOVER, 0))
-	_theme.set_stylebox("pressed", "Button", _style(Palette.BUTTON_ACTIVE, 4, CORNER_RADIUS, Palette.ACCENT))
-	_theme.set_stylebox("hover_pressed", "Button", _style(Palette.BUTTON_ACTIVE, 4, CORNER_RADIUS, Palette.ACCENT))
-	_theme.set_stylebox("disabled", "Button", _style(Color(Palette.BUTTON, 0.45), 0))
-	_theme.set_stylebox("focus", "Button", StyleBoxEmpty.new())
-	_theme.set_stylebox("panel", "PanelContainer", _style(Color(1, 1, 1, 0.97), 0, 28))
-	_theme.set_stylebox("background", "ProgressBar", _style(Color(Palette.TEXT, 0.12), 0, 5))
-	_theme.set_stylebox("fill", "ProgressBar", _style(Palette.TEXT, 0, 5))
-
-
-func _style(color: Color, border: int, radius := CORNER_RADIUS, border_color := Palette.TEXT) -> StyleBoxFlat:
-	var style := StyleBoxFlat.new()
-	style.bg_color = color
-	style.set_corner_radius_all(radius)
-	style.set_border_width_all(border)
-	style.border_color = border_color
-	style.content_margin_left = 16
-	style.content_margin_right = 16
-	style.content_margin_top = 8
-	style.content_margin_bottom = 8
-	return style
+		if _toast_left < TOAST_FADE:
+			_toast_area.modulate.a = clampf(_toast_left / TOAST_FADE, 0.0, 1.0)
+		if _toast_left <= 0.0:
+			_toast_area.visible = false
 
 
 ## Строка статистики: иконка и число, а без иконки — подпись словами.
@@ -296,6 +276,32 @@ func _stat_row(icon_id: String, label: Label, key: String) -> Control:
 
 func _set_stat(label: Label, value: int) -> void:
 	label.text = tr(_stat_keys[label]) % value if _stat_keys.has(label) else str(value)
+
+
+## Всплывающее сообщение сверху по центру: белый текст на тёмной плашке цвета кнопок.
+func _build_toast() -> void:
+	_toast_area.theme = _theme
+	_toast_area.set_anchors_preset(Control.PRESET_TOP_WIDE)
+	_toast_area.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_toast_area.visible = false
+	add_child(_toast_area)
+	var panel := PanelContainer.new()
+	panel.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	var style := UiTheme.style(Color(Palette.BUTTON, 0.95), 0, 28)
+	style.content_margin_left = 32
+	style.content_margin_right = 32
+	style.content_margin_top = 14
+	style.content_margin_bottom = 14
+	panel.add_theme_stylebox_override("panel", style)
+	_toast.add_theme_color_override("font_color", Palette.BUTTON_TEXT)
+	_toast.add_theme_font_size_override("font_size", 32)
+	panel.add_child(_toast)
+	_toast_area.add_child(panel)
+
+
+func _place_toast(top: float) -> void:
+	_toast_area.offset_top = top
+	_toast_area.offset_bottom = top + 90.0
 
 
 func _build_offer() -> void:
@@ -327,11 +333,18 @@ func _build_game_over() -> void:
 	for label: Label in [title, _game_over_score, _game_over_record]:
 		label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 		box.add_child(label)
+	var row := HBoxContainer.new()
+	row.alignment = BoxContainer.ALIGNMENT_CENTER
+	row.add_theme_constant_override("separation", 24)
+	box.add_child(row)
 	var restart := _button(tr("GAME_OVER_RESTART"), null)
-	restart.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
 	restart.custom_minimum_size = Vector2(260, 96)
 	restart.pressed.connect(restart_requested.emit)
-	box.add_child(restart)
+	row.add_child(restart)
+	var to_menu := _button(tr("GAME_OVER_TO_MENU"), null)
+	to_menu.custom_minimum_size = Vector2(260, 96)
+	to_menu.pressed.connect(menu_requested.emit)
+	row.add_child(to_menu)
 
 
 ## Окно по центру экрана; возвращает контейнер для его содержимого.

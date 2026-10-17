@@ -28,6 +28,7 @@ var _balance: Balance
 var _week_time := 0.0
 var _house_timer := 0.0
 var _colors := 0
+var _retry_timer := 0.0
 
 
 func _init(sim: Simulation, map: MapData) -> void:
@@ -78,6 +79,11 @@ func step() -> void:
 		_week_time -= _balance.week_seconds
 		_end_week()
 		return
+	# Цвету, которому не хватило места под место назначения, ищем место снова раз в секунду.
+	_retry_timer += Simulation.DT
+	if _retry_timer >= 1.0:
+		_retry_timer = 0.0
+		_introduce_pending_colors()
 	_house_timer += Simulation.DT
 	if _house_timer >= _house_interval():
 		_house_timer = 0.0
@@ -98,9 +104,7 @@ func _start_week() -> void:
 	_sim.network.bounds = _map.area_at(week)
 	_sim.pin_interval = maxf(_balance.pin_interval * pow(_balance.pin_interval_decay, week),
 		_balance.pin_interval_min)
-	while _colors < _balance.color_weeks.size() and _balance.color_weeks[_colors] <= week:
-		_introduce_color(_colors)
-		_colors += 1
+	_introduce_pending_colors()
 	if week > 0 and week % _balance.destination_every_weeks == 0 and _colors > 0:
 		_spawn_destination(_sim.rng.randi_range(0, _colors - 1))
 
@@ -113,11 +117,21 @@ func _spawn_distance() -> float:
 	return minf(_balance.spawn_distance_start + _balance.spawn_distance_growth * week, _balance.spawn_distance_max)
 
 
-func _introduce_color(color: int) -> void:
+## Вводит цвета, чья неделя уже наступила, по порядку. Если месту назначения нового цвета пока негде
+## встать (всё занято), цвет ждёт: следующая попытка — через секунду или после расширения карты.
+func _introduce_pending_colors() -> void:
+	while _colors < _balance.color_weeks.size() and _balance.color_weeks[_colors] <= week:
+		if not _introduce_color(_colors):
+			return
+		_colors += 1
+
+
+func _introduce_color(color: int) -> bool:
 	if _spawn_destination(color) == null:
-		return
+		return false
 	for i in _balance.houses_per_new_color:
 		_spawn_house(color)
+	return true
 
 
 ## Цвет, у которого меньше всего домов на одно место назначения.

@@ -1,6 +1,8 @@
 extends Node3D
-## Корневая сцена: загружает карту и баланс, создаёт партию с модулем генерации и связывает с ней
-## отображение, ввод и интерфейс. Двигает симуляцию фиксированными шагами с учётом паузы и скорости.
+## Корневая сцена. При запуске показывает главное меню; по «Начать» загружает карту и баланс,
+## создаёт партию с модулем генерации и связывает с ней отображение, ввод и интерфейс.
+## Двигает симуляцию фиксированными шагами с учётом паузы и скорости; пока открыто меню, время стоит.
+## Кнопка «Назад» Android в игре открывает меню, в меню — закрывает приложение.
 
 const MAP_PATH := "res://maps/city01.json"
 const BALANCE_PATH := "res://config/balance.json"
@@ -22,7 +24,7 @@ const RESULT_MESSAGES := {
 	RoadNetwork.Result.NOT_CONNECTED: "MSG_NOT_CONNECTED",
 	RoadNetwork.Result.BRIDGE_SHAPE: "MSG_BRIDGE_SHAPE",
 	RoadNetwork.Result.BRIDGE_TOO_LONG: "MSG_BRIDGE_TOO_LONG",
-	RoadNetwork.Result.TERMINAL_FULL: "MSG_HOUSE_CONNECTED",
+	RoadNetwork.Result.NO_ROOM: "MSG_NO_ROOM",
 }
 
 var _sim: Simulation
@@ -33,6 +35,7 @@ var _input := StrokeInput.new()
 var _hud := Hud.new()
 var _audio := Audio.new()
 var _edge_alerts := EdgeAlerts.new()
+var _menu := MainMenu.new()
 var _speed := 1
 var _accumulator := 0.0
 var _game_over_shown := false
@@ -41,6 +44,7 @@ var _area := Rect2i()
 
 
 func _ready() -> void:
+	get_tree().quit_on_go_back = false
 	_build_environment()
 	add_child(_audio)
 	var alerts_layer := CanvasLayer.new()  # под интерфейсом, над картой
@@ -53,19 +57,47 @@ func _ready() -> void:
 	_hud.sound_toggled.connect(_audio.set_muted)
 	_hud.button_clicked.connect(_audio.play.bind("click"))
 	_input.action_succeeded.connect(_audio.play)
-	_input.is_over_ui = _hud.is_point_over_ui
+	_input.is_over_ui = func(pos: Vector2) -> bool: return _menu.visible or _hud.is_point_over_ui(pos)
 	_input.action_failed.connect(_on_action_failed)
 	_input.motorway_preview_changed.connect(func(from: Vector2i, to: Vector2i, valid: bool) -> void:
 		_world.show_motorway_preview(from, to, valid))
 	_input.motorway_preview_hidden.connect(func() -> void: _world.hide_motorway_preview())
+	_input.motorway_end_selected.connect(func(cell: Variant) -> void: _world.show_end_selection(cell))
 	_hud.tool_selected.connect(func(tool: StrokeInput.Tool) -> void: _input.tool = tool)
 	_hud.speed_selected.connect(func(speed: int) -> void: _speed = speed)
 	_hud.upgrade_chosen.connect(_on_upgrade_chosen)
 	_hud.restart_requested.connect(_start_game)
-	_start_game()
+	_hud.menu_requested.connect(_open_menu)
+	add_child(_menu)
+	_menu.button_clicked.connect(_audio.play.bind("click"))
+	_menu.start_requested.connect(_start_game)
+	_menu.continue_requested.connect(_close_menu)
+	_menu.exit_requested.connect(get_tree().quit)
+	_open_menu()
+
+
+func _notification(what: int) -> void:
+	if what == NOTIFICATION_WM_GO_BACK_REQUEST:
+		if _menu.visible:
+			get_tree().quit()
+		else:
+			_open_menu()
+
+
+## Открывает меню; партия (если есть) стоит, пока меню открыто.
+func _open_menu() -> void:
+	_menu.show_menu(_sim != null and not _sim.game_over)
+	_hud.visible = false
+
+
+func _close_menu() -> void:
+	_menu.visible = false
+	_hud.visible = true
 
 
 func _process(delta: float) -> void:
+	if _sim == null or _menu.visible:
+		return
 	if _director.has_offer():
 		if not _offer_shown:
 			_offer_shown = true
@@ -111,6 +143,7 @@ func _start_game() -> void:
 	_area = Rect2i()
 	_input.sim = _sim
 	_input.camera = _camera
+	_input.reset()
 	_edge_alerts.sim = _sim
 	_edge_alerts.camera = _camera
 	_input.tool = StrokeInput.Tool.ROAD
@@ -119,6 +152,7 @@ func _start_game() -> void:
 	_game_over_shown = false
 	_offer_shown = false
 	_hud.reset()
+	_close_menu()
 
 
 ## Показывает видимую часть карты целиком; при расширении карты камера отъезжает.
