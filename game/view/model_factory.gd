@@ -2,6 +2,14 @@ class_name ModelFactory
 extends RefCounted
 ## Процедурные low-poly модели. Стиль задаётся параметрами (цвет, размеры), а не файлами моделей.
 
+## Отступ корпуса места назначения от края клеток по внешнему контуру.
+const BODY_INSET := 0.06
+const BODY_HEIGHT := 0.5
+## Ширина светлого канта по краю крыши места назначения.
+const ROOF_RIM := 0.13
+const STRIP_LENGTH := 1.2
+const STRIP_WIDTH := 0.2
+
 static var _materials: Dictionary = {}
 
 
@@ -34,54 +42,114 @@ static func house(color: Color) -> Node3D:
 	return root
 
 
-## Место назначения на 2×2 клетки. У каждого цвета свой силуэт, чтобы здания различались
-## не только цветом. Высота крыши (куда ставятся метки заказов) — в meta «roof_height».
-static func destination(color_index: int) -> Node3D:
+## Место назначения по образцу «завода»: цельный корпус из клеток cells (центры клеток относительно
+## начала модели, по X и Z) — крыша цвета здания со светлым кантом по краю. Если задан details:
+## - chimneys: две трубы (центры по X и Z);
+## - strip_center, strip_axis, windows: полоса из windows окон вдоль оси strip_axis (к дальнему концу);
+## - door, door_out: ворота в стене над парковкой и направление к парковке.
+## Окна — индикатор запаса терпения здания: их материалы — в meta «windows», окно 0 у дальнего
+## конца гаснет последним.
+static func destination(color_index: int, cells: Array[Vector2], details := {}) -> Node3D:
 	var color := Palette.building(color_index)
 	var root := Node3D.new()
-	var roof := 0.5
-	match color_index % 6:
-		0:  # контора: плоская крыша с надстройкой
-			root.add_child(_box(Vector3(1.7, 0.5, 1.7), color, 0.0))
-			root.add_child(_box(Vector3(1.3, 0.08, 1.3), color.lightened(0.3), 0.5))
-			roof = 0.58
-		1:  # ступенчатое здание
-			root.add_child(_box(Vector3(1.7, 0.35, 1.7), color, 0.0))
-			root.add_child(_box(Vector3(1.15, 0.3, 1.15), color.lightened(0.15), 0.35))
-			roof = 0.65
-		2:  # завод с трубой
-			root.add_child(_box(Vector3(1.7, 0.45, 1.7), color, 0.0))
-			var chimney := _cylinder(0.14, 0.55, color.darkened(0.25), 0.45)
-			chimney.position += Vector3(0.55, 0.0, -0.55)
-			root.add_child(chimney)
-			roof = 0.45
-		3:  # мастерская с пилообразной крышей
-			root.add_child(_box(Vector3(1.7, 0.35, 1.7), color, 0.0))
-			for z in [-0.42, 0.42]:
-				var tooth := PrismMesh.new()
-				tooth.left_to_right = 0.0
-				tooth.size = Vector3(1.7, 0.3, 0.84)
-				var part := _part(tooth, color.lightened(0.2), 0.35 + tooth.size.y / 2)
-				part.rotation.y = PI / 2
-				part.position.z = z
-				root.add_child(part)
-			roof = 0.65
-		4:  # круглое здание
-			root.add_child(_cylinder(0.85, 0.5, color, 0.0))
-			root.add_child(_cylinder(0.6, 0.06, color.lightened(0.3), 0.5))
-			roof = 0.56
-		5:  # здание с куполом
-			root.add_child(_box(Vector3(1.7, 0.4, 1.7), color, 0.0))
-			var dome := SphereMesh.new()
-			dome.radius = 0.55
-			dome.height = 0.55
-			dome.is_hemisphere = true
-			dome.radial_segments = 12
-			dome.rings = 4
-			root.add_child(_part(dome, color.lightened(0.25), 0.4))
-			roof = 0.95
-	root.set_meta("roof_height", roof)
+	_cell_boxes(root, cells, BODY_INSET, 0.0, BODY_HEIGHT - 0.02, color.darkened(0.08))
+	_cell_boxes(root, cells, BODY_INSET, BODY_HEIGHT - 0.02, 0.02, color.lightened(0.3))
+	_cell_boxes(root, cells, ROOF_RIM, BODY_HEIGHT, 0.02, color)
+	var windows: Array[StandardMaterial3D] = []
+	if not details.is_empty():
+		for chimney: Vector2 in details["chimneys"]:
+			_add_chimney(root, chimney, color)
+		windows = _add_window_strip(root, details["strip_center"], details["strip_axis"], details["windows"])
+		_add_loading_door(root, details["door"], details["door_out"])
+	root.set_meta("windows", windows)
 	return root
+
+
+## Труба на крыше: светлое основание, цилиндр и тёмное отверстие сверху.
+static func _add_chimney(root: Node3D, at: Vector2, color: Color) -> void:
+	var top := BODY_HEIGHT + 0.02
+	for part in [
+		_cylinder(0.26, 0.03, color.lightened(0.3), top),
+		_cylinder(0.2, 0.3, color.lightened(0.12), top),
+		_cylinder(0.13, 0.01, color.darkened(0.6), top + 0.3),
+	]:
+		part.position.x = at.x
+		part.position.z = at.y
+		root.add_child(part)
+
+
+## Полоса окон в светлой раме вдоль оси axis; возвращает материалы окон (от дальнего конца к ближнему).
+static func _add_window_strip(root: Node3D, center: Vector2, axis: Vector2, count: int) -> Array[StandardMaterial3D]:
+	var top := BODY_HEIGHT + 0.02
+	var along_x := absf(axis.x) > 0.5
+	var frame_size := Vector2(STRIP_LENGTH + 0.08, STRIP_WIDTH + 0.08)
+	var frame := _box(Vector3(frame_size.x if along_x else frame_size.y, 0.02, frame_size.y if along_x else frame_size.x),
+		Palette.WINDOW_FRAME, top)
+	frame.position = Vector3(center.x, frame.position.y, center.y)
+	root.add_child(frame)
+	var materials: Array[StandardMaterial3D] = []
+	var step := STRIP_LENGTH / count
+	for i in count:
+		var material := StandardMaterial3D.new()
+		material.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+		material.albedo_color = Palette.WINDOW_LIT
+		var length := step - 0.04
+		var mesh := BoxMesh.new()
+		mesh.size = Vector3(length if along_x else STRIP_WIDTH, 0.02, STRIP_WIDTH if along_x else length)
+		var window := MeshInstance3D.new()
+		window.mesh = mesh
+		window.material_override = material
+		var offset := axis * (STRIP_LENGTH / 2 - step * (i + 0.5))
+		window.position = Vector3(center.x + offset.x, top + 0.02, center.y + offset.y)
+		root.add_child(window)
+		materials.append(material)
+	return materials
+
+
+## Ворота в стене над парковкой: тёмный проём, светлый козырёк и жёлтые столбики по бокам.
+static func _add_loading_door(root: Node3D, at: Vector2, out: Vector2) -> void:
+	var across := Vector2(-out.y, out.x)
+	var along_x := absf(out.x) > 0.5
+	var door := _box(Vector3(0.06 if along_x else 0.5, 0.28, 0.5 if along_x else 0.06), Palette.DOOR, 0.0)
+	var awning := _box(Vector3(0.14 if along_x else 0.62, 0.04, 0.62 if along_x else 0.14), Palette.WINDOW_FRAME, 0.3)
+	for part: MeshInstance3D in [door, awning]:
+		var shift := at + out * (0.03 if part == door else 0.07)
+		part.position.x = shift.x
+		part.position.z = shift.y
+		root.add_child(part)
+	for side: float in [-1.0, 1.0]:
+		var post := _cylinder(0.035, 0.2, Palette.ACCENT, 0.0)
+		var where := at + out * 0.12 + across * 0.31 * side
+		post.position.x = where.x
+		post.position.z = where.y
+		root.add_child(post)
+
+
+## Ступенька по клеткам: над каждой клеткой коробка от bottom высотой height. Со стороны соседней
+## клетки фигуры коробка доходит до края клетки (тела смыкаются), с внешних сторон — отступ inset.
+static func _cell_boxes(root: Node3D, cells: Array[Vector2], inset: float, bottom: float, height: float, color: Color) -> void:
+	for cell in cells:
+		var extent := _cell_extent(cell, cells, inset)
+		var box := _box(Vector3(extent.size.x, height, extent.size.y), color, bottom)
+		box.position.x = extent.get_center().x
+		box.position.z = extent.get_center().y
+		root.add_child(box)
+
+
+## Прямоугольник клетки по X и Z с отступом inset только по внешнему контуру фигуры.
+static func _cell_extent(cell: Vector2, cells: Array[Vector2], inset: float) -> Rect2:
+	var left := cell.x - 0.5 + (0.0 if _has_cell(cells, cell + Vector2.LEFT) else inset)
+	var right := cell.x + 0.5 - (0.0 if _has_cell(cells, cell + Vector2.RIGHT) else inset)
+	var top := cell.y - 0.5 + (0.0 if _has_cell(cells, cell + Vector2.UP) else inset)
+	var bottom := cell.y + 0.5 - (0.0 if _has_cell(cells, cell + Vector2.DOWN) else inset)
+	return Rect2(left, top, right - left, bottom - top)
+
+
+static func _has_cell(cells: Array[Vector2], cell: Vector2) -> bool:
+	for other in cells:
+		if other.is_equal_approx(cell):
+			return true
+	return false
 
 
 ## Дерево: ствол и крона из нескольких граней.
@@ -103,12 +171,16 @@ static func tree_crown_mesh() -> Mesh:
 	return crown
 
 
-## Въезд места назначения: тёмный проём, выступающий из угла здания.
-static func gate() -> Node3D:
+## Парковка места назначения: площадка цвета дороги с разметкой мест. Разметка идёт вдоль оси Z —
+## отображение поворачивает парковку разметкой к подъезду.
+static func parking() -> Node3D:
 	var root := Node3D.new()
-	var mesh := BoxMesh.new()
-	mesh.size = Vector3(0.36, 0.3, 0.36)
-	root.add_child(_part(mesh, Palette.ROAD, mesh.size.y / 2))
+	root.add_child(_box(Vector3(1.0, 0.03, 1.0), Palette.ROAD, 0.02))
+	for x in [-0.3, 0.0, 0.3]:
+		var line := _box(Vector3(0.05, 0.01, 0.62), Palette.PARKING_LINE, 0.05)
+		line.position.x = x
+		line.position.z = -0.08
+		root.add_child(line)
 	return root
 
 

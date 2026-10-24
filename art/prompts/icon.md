@@ -124,16 +124,6 @@ Minimalist flat vector UI icon. Clean geometric shapes with rounded corners and 
 Subject: A small rounded car, side view.
 ```
 
-## stat_tiles
-
-Итог: 96×96 → `game/assets/ui/icons/stat_tiles.png`
-
-```
-Minimalist flat vector UI icon. Clean geometric shapes with rounded corners and one uniform stroke width. Single solid color #3A3A40 (dark graphite) only: no other colors, no gradients, no shadows, no texture, no outlines of a different color. No text, no letters, no numbers. The icon is centered and occupies about 70% of the canvas. Perfectly flat solid magenta #FF00FF background filling the whole image, with nothing else on it. Square 1:1.
-
-Subject: A square road tile seen from above with a dashed center line.
-```
-
 ## stat_bridges
 
 Итог: 96×96 → `game/assets/ui/icons/stat_bridges.png`

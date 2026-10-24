@@ -18,6 +18,11 @@ static func get_theme() -> Theme:
 	return _theme
 
 
+## Сбросить тему — чтобы после правки этого файла (горячая перезагрузка на ПК) она собралась заново.
+static func reset() -> void:
+	_theme = null
+
+
 static func font() -> Font:
 	return get_theme().default_font
 

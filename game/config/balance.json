@@ -20,6 +20,7 @@
 	"pin_interval_min": 2.5,
 	"destination_start_delay": 7.0,
 	"overflow_pins": 5,
+	"supply_windows": 5,
 	"warning_ratio": 0.7,
 	"overflow_time": 20.0,
 	"overflow_recovery": 0.5,

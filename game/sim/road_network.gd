@@ -45,6 +45,7 @@ var _roads: Dictionary = {}      # клетки дорог и мостов
 var _links: Dictionary = {}      # Vector2i -> Array[Vector2i]
 var _motorways: Dictionary = {}  # Vector4i (пара клеток по порядку) -> true
 var _controls: Dictionary = {}   # клетка -> Junction
+var _permanent: Dictionary = {}  # дороги, которые нельзя снести (подъезды к парковкам)
 var _astar := RoadAStar.new()
 
 
@@ -103,8 +104,27 @@ func add_terminal(cell: Vector2i, max_links := 0) -> void:
 	_astar.set_point_disabled(grid.index_of(cell), true)
 
 
+## Постоянная дорога из клетки cell к клетке linked_to (подъезд к парковке места назначения):
+## появляется вместе со зданием, не тратит запас дорог и не сносится.
+func add_fixed_road(cell: Vector2i, linked_to: Vector2i) -> void:
+	_roads[cell] = true
+	_permanent[cell] = true
+	_ensure_point(cell)
+	_link(cell, linked_to)
+	version += 1
+
+
+func is_permanent(cell: Vector2i) -> bool:
+	return _permanent.has(cell)
+
+
 func add_blocked(cell: Vector2i) -> void:
 	_blocked[cell] = true
+
+
+## Есть ли на карте вода. Без воды мосты не нужны: интерфейс их прячет, а директор не предлагает.
+func has_water() -> bool:
+	return not _water.is_empty()
 
 
 func is_water(cell: Vector2i) -> bool:
@@ -420,9 +440,9 @@ func place_control(cell: Vector2i, control: Junction) -> Result:
 
 
 ## Сносит дорогу или мост в клетке вместе со связями, шоссе и светофором/развязкой —
-## всё это возвращается в запас. Входы зданий снести нельзя.
+## всё это возвращается в запас. Входы зданий и постоянные подъезды к парковкам снести нельзя.
 func erase(cell: Vector2i) -> bool:
-	if not _roads.has(cell):
+	if not _roads.has(cell) or _permanent.has(cell):
 		return false
 	for neighbor: Vector2i in links_of(cell).duplicate():
 		_unlink(cell, neighbor)

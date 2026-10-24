@@ -45,7 +45,7 @@ func _init(map: MapData, game_balance: Balance, seed_value: int) -> void:
 	for house: Dictionary in map.houses:
 		add_house(house["cell"], house["color"])
 	for dest: Dictionary in map.destinations:
-		add_destination(dest["rect"], dest["entrance"], dest["color"])
+		add_destination(dest["rect"], dest["entrance"], dest["color"], dest.get("stub"))
 
 
 func add_house(cell: Vector2i, color: int) -> House:
@@ -57,8 +57,10 @@ func add_house(cell: Vector2i, color: int) -> House:
 	return house
 
 
-func add_destination(rect: Rect2i, entrance: Vector2i, color: int) -> Destination:
-	var dest := Destination.new(destinations.size(), rect, entrance, color)
+## Место назначения. Если задан stub — от въезда-парковки к нему ведёт постоянный подъезд, и въезд
+## принимает только его: дороги игрок подводит к подъезду.
+func add_destination(rect: Rect2i, entrance: Vector2i, color: int, stub: Variant = null) -> Destination:
+	var dest := Destination.new(destinations.size(), rect, entrance, color, stub)
 	# Новое место назначения сначала «открывается»: первый заказ — через destination_start_delay секунд.
 	dest.pin_timer = pin_interval - balance.destination_start_delay
 	destinations.append(dest)
@@ -66,9 +68,11 @@ func add_destination(rect: Rect2i, entrance: Vector2i, color: int) -> Destinatio
 		for x in range(rect.position.x, rect.end.x):
 			var cell := Vector2i(x, y)
 			if cell == entrance:
-				network.add_terminal(cell)
+				network.add_terminal(cell, 1 if stub != null else 0)
 			else:
 				network.add_blocked(cell)
+	if stub != null:
+		network.add_fixed_road(stub, entrance)
 	return dest
 
 
@@ -86,6 +90,23 @@ func is_house_served(house: House) -> bool:
 		if dest.color == house.color and _route(house, dest).size() >= 2:
 			return true
 	return false
+
+
+## Сколько окон запаса терпения у места назначения.
+func supply_slots() -> int:
+	return balance.supply_windows
+
+
+## Запас терпения места назначения в окнах: от supply_slots() (всё в порядке) до 0 (проигрыш).
+## Это та же механика заказов и переполнения, показанная «наоборот» и пропорционально: шкала —
+## overflow_pins невыполненных заказов плюс таймер переполнения как ещё одна единица, и окна делят
+## её поровну (при шкале в 10 единиц и 5 окнах каждые 2 невыполненных заказа гасят окно). Последняя
+## часть шкалы уходит плавно, пока идёт таймер.
+func supply_level(dest: Destination) -> float:
+	var units := float(balance.overflow_pins + 1)
+	var left := float(balance.overflow_pins - mini(dest.pins, balance.overflow_pins))
+	left += 1.0 - clampf(dest.overflow / balance.overflow_time, 0.0, 1.0)
+	return left / units * balance.supply_windows
 
 
 ## Место назначения в тревоге: заказов набралось warning_ratio от порога переполнения

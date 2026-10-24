@@ -94,6 +94,8 @@ func _end_week() -> void:
 	week += 1
 	_sim.network.tiles_left += _balance.week_tiles
 	var kinds: Array = Upgrade.values()
+	if not _sim.network.has_water():
+		kinds.erase(Upgrade.BRIDGES)  # на карте без реки мосты бесполезны
 	var first: int = kinds.pop_at(_sim.rng.randi_range(0, kinds.size() - 1))
 	var second: int = kinds[_sim.rng.randi_range(0, kinds.size() - 1)]
 	offer = [first, second]
@@ -149,28 +151,44 @@ func _neediest_color() -> int:
 	return best
 
 
-## Место назначения 2×2 на свободной суше с полосой свободных от зданий клеток вокруг.
-## Вход — одна из клеток здания, рядом с которой снаружи есть свободная суша.
+## Место назначения 2×3 на свободной суше: здание 2×2 и торцевой ряд из парковки и пристройки;
+## от парковки наружу вдоль здания — постоянный подъезд. Вокруг здания — полоса без других зданий,
+## подъезд — на свободной суше. Ориентацию (8 вариантов) и место выбирает RNG партии.
 func _spawn_destination(color: int) -> Destination:
 	var network := _sim.network
 	var area := spawn_area()
-	var candidates: Array[Rect2i] = []
-	for y in range(area.position.y, area.end.y - 1):
-		for x in range(area.position.x, area.end.x - 1):
-			var rect := Rect2i(x, y, 2, 2)
-			if _rect_is_free(rect) and _far_from_destinations(rect, 4.0):
-				candidates.append(rect)
+	var candidates: Array[Dictionary] = []
+	for y in range(area.position.y, area.end.y):
+		for x in range(area.position.x, area.end.x):
+			for layout in _destination_layouts(Vector2i(x, y)):
+				var rect: Rect2i = layout["rect"]
+				if area.encloses(rect) and area.has_point(layout["stub"]) and network.is_free_land(layout["stub"]) \
+						and _rect_is_free(rect) and _far_from_destinations(rect, 4.0):
+					candidates.append(layout)
 	if candidates.is_empty():
 		return null
-	var rect := candidates[_sim.rng.randi_range(0, candidates.size() - 1)]
-	var entrances: Array[Vector2i] = []
-	for cell in _cells_of(rect):
-		for neighbor in network.grid.neighbors8(cell):
-			if not rect.has_point(neighbor) and network.is_free_land(neighbor) and not entrances.has(cell):
-				entrances.append(cell)
-	if entrances.is_empty():
-		return null
-	return _sim.add_destination(rect, entrances[_sim.rng.randi_range(0, entrances.size() - 1)], color)
+	var chosen := candidates[_sim.rng.randi_range(0, candidates.size() - 1)]
+	return _sim.add_destination(chosen["rect"], chosen["entrance"], color, chosen["stub"])
+
+
+## Восемь вариантов здания 2×3 с левым верхним углом в origin: вертикальное или горизонтальное,
+## парковка в одном из двух торцов и в одной из двух клеток торца.
+static func _destination_layouts(origin: Vector2i) -> Array[Dictionary]:
+	var layouts: Array[Dictionary] = []
+	for vertical in [true, false]:
+		var rect := Rect2i(origin, Vector2i(2, 3) if vertical else Vector2i(3, 2))
+		for far_end in [false, true]:
+			for side in 2:
+				var entrance: Vector2i
+				var outward: Vector2i
+				if vertical:
+					entrance = Vector2i(origin.x + side, rect.end.y - 1 if far_end else origin.y)
+					outward = Vector2i(0, 1 if far_end else -1)
+				else:
+					entrance = Vector2i(rect.end.x - 1 if far_end else origin.x, origin.y + side)
+					outward = Vector2i(1 if far_end else -1, 0)
+				layouts.append({"rect": rect, "entrance": entrance, "stub": entrance + outward})
+	return layouts
 
 
 ## Дом цвета color: с вероятностью cluster_chance — рядом с домом того же цвета, иначе — на

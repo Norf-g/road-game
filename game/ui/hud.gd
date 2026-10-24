@@ -59,7 +59,6 @@ const UPGRADE_ICONS := {
 var _theme := UiTheme.get_theme()
 var _week := Label.new()
 var _week_progress := ProgressBar.new()
-var _tiles := Label.new()
 var _bridges := Label.new()
 var _score := Label.new()
 var _fps := Label.new()
@@ -71,7 +70,7 @@ var _toast_left := 0.0
 var _toast_tween: Tween
 var _buttons: Array[Button] = []
 var _speed_buttons: Array[Button] = []
-var _tool_buttons := {}  # StrokeInput.Tool -> Button
+var _tool_buttons := {}  # StrokeInput.Tool -> TechButton
 var _sound_button: Button
 var _muted := false
 var _offer := CenterContainer.new()
@@ -111,7 +110,6 @@ func _ready() -> void:
 	_week_progress.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	stats.add_child(_stat_row("stat_week", _week, "HUD_WEEK"))
 	stats.add_child(_week_progress)
-	stats.add_child(_stat_row("stat_tiles", _tiles, "HUD_TILES"))
 	stats.add_child(_stat_row("stat_bridges", _bridges, "HUD_BRIDGES"))
 	stats.add_child(_stat_row("stat_trips", _score, "HUD_SCORE"))
 	stats.add_child(_fps)
@@ -141,10 +139,10 @@ func _ready() -> void:
 	var bottom := HBoxContainer.new()
 	_ignore(bottom)
 	bottom.alignment = BoxContainer.ALIGNMENT_CENTER
-	bottom.add_theme_constant_override("separation", 12)
+	bottom.add_theme_constant_override("separation", 14)
 	var tool_group := ButtonGroup.new()
 	for tool: StrokeInput.Tool in TOOL_KEYS:
-		var button := _icon_button(TOOL_ICONS[tool], tr(TOOL_KEYS[tool]), tool_group)
+		var button := _tool_button(TOOL_ICONS[tool], tr(TOOL_KEYS[tool]), tool_group)
 		button.pressed.connect(tool_selected.emit.bind(tool))
 		bottom.add_child(button)
 		_tool_buttons[tool] = button
@@ -171,6 +169,10 @@ func select_tool(tool: StrokeInput.Tool) -> void:
 	(_tool_buttons[tool] as Button).button_pressed = true
 
 
+func select_speed(speed: int) -> void:
+	_speed_buttons[speed].button_pressed = true
+
+
 ## Показывает состояние звука на кнопке (не меняет сам звук).
 func set_muted(muted: bool) -> void:
 	_muted = muted
@@ -183,8 +185,9 @@ func update_stats(sim: Simulation, director: Director) -> void:
 	var network := sim.network
 	_set_stat(_week, director.week + 1)
 	_week_progress.value = director.week_progress()
-	_set_stat(_tiles, network.tiles_left)
 	_set_stat(_bridges, network.bridge_stock - network.bridges_used)
+	# На карте без воды строка мостов не нужна.
+	_bridges.get_parent().visible = network.has_water()
 	_set_stat(_score, sim.score)
 	_fps.text = tr("HUD_FPS") % Engine.get_frames_per_second()
 	var stocks := {
@@ -194,11 +197,8 @@ func update_stats(sim: Simulation, director: Director) -> void:
 		StrokeInput.Tool.ROUNDABOUT: network.roundabouts_left,
 	}
 	for tool: StrokeInput.Tool in stocks:
-		var button: Button = _tool_buttons[tool]
-		var count := str(stocks[tool])
-		button.text = count if button.icon != null else "%s · %s" % [tr(TOOL_KEYS[tool]), count]
-		# Иконка с числом запаса: иконка слева, число справа — иначе они накладываются.
-		button.icon_alignment = HORIZONTAL_ALIGNMENT_LEFT
+		var button: TechButton = _tool_buttons[tool]
+		button.count = stocks[tool]
 		# «Дорогу» не блокируем и без запаса: можно вести дорогу по мостам и переносить выезд дома.
 		button.disabled = stocks[tool] == 0 and tool != StrokeInput.Tool.ROAD
 
@@ -373,6 +373,18 @@ func _ignore(control: Control) -> Control:
 
 
 ## Кнопка с иконкой, а пока иконки нет — с текстом.
+## Кнопка нижней панели инструментов (стиль «технического HUD», см. TechButton).
+func _tool_button(icon_id: String, fallback: String, group: ButtonGroup) -> TechButton:
+	var button := TechButton.new()
+	button.texture = icon(icon_id)
+	button.caption = fallback
+	button.toggle_mode = true
+	button.button_group = group
+	button.pressed.connect(button_clicked.emit)
+	_buttons.append(button)
+	return button
+
+
 func _icon_button(icon_id: String, fallback: String, group: ButtonGroup) -> Button:
 	var texture := icon(icon_id)
 	var button := _button("" if texture != null else fallback, group)

@@ -7,14 +7,14 @@ extends Node3D
 
 const ROAD_WIDTH := 0.5
 const ROAD_HEIGHT := 0.02
+## Сколько отрезков в круге на стыке дорог.
+const DISC_SEGMENTS := 24
 const FOG_HEIGHT := 0.04
 ## Эстакада выше любой крыши: дома ~0.6, купол места назначения ~0.95.
 const MOTORWAY_HEIGHT := 1.2
 ## Длина съезда шоссе с земли на эстакаду.
 const MOTORWAY_RAMP := 1.6
 const CAR_SIZE := Vector3(0.2, 0.12, 0.3)
-const MAX_PIN_MARKERS := 8
-const PIN_SIZE := 0.18
 const SLEEP_HEIGHT := 1.15
 const BLINK_HZ := 1.5
 ## Доля свободных клеток с деревом. Деревья — только украшение: исчезают под дорогами и зданиями.
@@ -39,8 +39,8 @@ var _served: Array[bool] = []
 ## Полупрозрачный красный слой поверх модели каждого места назначения — для мигания.
 var _warning_overlays: Array[StandardMaterial3D] = []
 var _destinations_shown := 0
-var _pin_markers: Array = []  # для каждого места назначения — Array[MeshInstance3D]
-var _overflow_bars: Array[MeshInstance3D] = []
+## Материалы окон каждого места назначения — индикатор запаса терпения.
+var _windows: Array = []  # для каждого места назначения — Array[StandardMaterial3D]
 var _tree_trunks := MultiMeshInstance3D.new()
 var _tree_crowns := MultiMeshInstance3D.new()
 var _trees_key := []
@@ -168,16 +168,16 @@ func _fog_mesh() -> ArrayMesh:
 	return st.commit()
 
 
-## Дороги: квадрат в центре каждой клетки дороги и полоса от центра клетки до середины каждой связи.
+## Дороги: круг в центре каждой клетки дороги и полоса от центра клетки до середины каждой связи.
 ## Шоссе рисуются отдельно — эстакадой со съездами.
 func _road_mesh() -> ArrayMesh:
 	var network := _sim.network
 	var st := SurfaceTool.new()
 	st.begin(Mesh.PRIMITIVE_TRIANGLES)
-	var half := ROAD_WIDTH / 2
+	# Круг в центре каждой клетки дороги — скруглённый стык: полосы под любым углом (в том числе
+	# диагональ с прямой) сходятся гладко, без торчащих углов, а тупик получает круглое окончание.
 	for cell: Vector2i in network.road_cells():
-		var c := cell_center(cell)
-		_add_rect(st, c + Vector3(-half, ROAD_HEIGHT, -half), c + Vector3(half, ROAD_HEIGHT, half), _road_color(cell))
+		_add_disc(st, cell_center(cell) + Vector3.UP * ROAD_HEIGHT, ROAD_WIDTH / 2, _road_color(cell))
 	for cell: Vector2i in network.linked_cells():
 		var from := cell_center(cell) + Vector3.UP * ROAD_HEIGHT
 		for neighbor: Vector2i in network.links_of(cell):
@@ -232,22 +232,31 @@ func _show_new_buildings() -> void:
 		_turn_houses_to_exits()
 	while _destinations_shown < _sim.destinations.size():
 		var dest := _sim.destinations[_destinations_shown]
-		var center := Vector3(dest.rect.get_center().x, 0.0, dest.rect.get_center().y)
-		var model := ModelFactory.destination(dest.color)
-		# Въезд — тёмный проём в углу здания, где находится клетка въезда.
-		var gate := ModelFactory.gate()
-		var outward := Vector3(dest.entrance.x + 0.5, 0.0, dest.entrance.y + 0.5) - center
-		gate.position = outward * 1.8
-		gate.rotation.y = atan2(outward.x, outward.z)
-		model.add_child(gate)
+		var main := _main_rect(dest)
+		var center := Vector3(main.position.x + main.size.x / 2.0, 0.0, main.position.y + main.size.y / 2.0)
+		# Корпус — все клетки здания, кроме парковки: основная часть и пристройка одним телом.
+		var cells: Array[Vector2] = []
+		for y in range(dest.rect.position.y, dest.rect.end.y):
+			for x in range(dest.rect.position.x, dest.rect.end.x):
+				if Vector2i(x, y) != dest.entrance or dest.stub == null:
+					var offset := cell_center(Vector2i(x, y)) - center
+					cells.append(Vector2(offset.x, offset.z))
+		var model := ModelFactory.destination(dest.color, cells, _destination_details(dest, center))
 		var overlay := StandardMaterial3D.new()
 		overlay.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
 		overlay.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
 		overlay.albedo_color = Color(Palette.OVERFLOW, 0.0)
 		_set_overlay(model, overlay)
 		_warning_overlays.append(overlay)
+		if dest.stub != null:
+			# Парковка не мигает вместе со зданием — её добавляем после слоя тревоги.
+			var parking := ModelFactory.parking()
+			var toward: Vector2i = dest.stub - dest.entrance
+			parking.position = cell_center(dest.entrance) - center
+			parking.rotation.y = atan2(toward.x, toward.y)
+			model.add_child(parking)
 		_pop_in(model, center)
-		_build_pin_markers(dest, model.get_meta("roof_height"))
+		_windows.append(model.get_meta("windows"))
 		_destinations_shown += 1
 
 
@@ -308,48 +317,53 @@ func _pop_in(model: Node3D, at: Vector3) -> void:
 		.set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_OUT)
 
 
-func _build_pin_markers(dest: Destination, roof_height: float) -> void:
-	var markers: Array[MeshInstance3D] = []
-	var center := Vector3(dest.rect.get_center().x, roof_height, dest.rect.get_center().y)
-	var box := BoxMesh.new()
-	box.size = Vector3.ONE * PIN_SIZE
-	for i in MAX_PIN_MARKERS:
-		var marker := MeshInstance3D.new()
-		marker.mesh = box
-		marker.material_override = ModelFactory.flat_material(Palette.building(dest.color).darkened(0.35))
-		var column := i % 4
-		var row := i / 4
-		marker.position = center + Vector3((column - 1.5) * 0.3, PIN_SIZE / 2, (row - 0.5) * 0.3)
-		marker.visible = false
-		add_child(marker)
-		markers.append(marker)
-	_pin_markers.append(markers)
+## Детали по образцу для места назначения 2×3 с подъездом (у прочих — пусто): трубы в дальнем от
+## парковки ряду, полоса окон над клеткой рядом с пристройкой, ворота над парковкой. Всё — в координатах
+## модели (относительно center).
+func _destination_details(dest: Destination, center: Vector3) -> Dictionary:
+	if dest.stub == null or dest.rect.size.x * dest.rect.size.y != 6:
+		return {}
+	var out: Vector2i = dest.stub - dest.entrance
+	var far := -out
+	var across: Vector2i = Vector2i(out.y, -out.x)
+	if not dest.rect.has_point(dest.entrance + across):
+		across = -across
+	var local := func(cell: Vector2i) -> Vector2:
+		var offset := cell_center(cell) - center
+		return Vector2(offset.x, offset.z)
+	var door_cell := dest.entrance + far
+	return {
+		"chimneys": [local.call(dest.entrance + far * 2), local.call(dest.entrance + far * 2 + across)],
+		"strip_center": local.call(door_cell + across),
+		"strip_axis": Vector2(far),
+		"windows": _sim.supply_slots(),
+		"door": (local.call(dest.entrance) + local.call(door_cell)) / 2,
+		"door_out": Vector2(out),
+	}
 
-	var bar := MeshInstance3D.new()
-	var bar_mesh := BoxMesh.new()
-	bar_mesh.size = Vector3(1.0, 0.08, 0.16)
-	bar.mesh = bar_mesh
-	bar.material_override = ModelFactory.flat_material(Palette.OVERFLOW)
-	bar.position = center + Vector3(0.0, 0.5, -0.6)
-	bar.visible = false
-	add_child(bar)
-	_overflow_bars.append(bar)
+
+## Основная часть места назначения (2×2) — без торцевого ряда с парковкой.
+static func _main_rect(dest: Destination) -> Rect2i:
+	var rect := dest.rect
+	if rect.size.y == 3:
+		return Rect2i(rect.position.x, rect.position.y + (1 if dest.entrance.y == rect.position.y else 0), 2, 2)
+	if rect.size.x == 3:
+		return Rect2i(rect.position.x + (1 if dest.entrance.x == rect.position.x else 0), rect.position.y, 2, 2)
+	return rect
 
 
 func _update_destinations() -> void:
 	for i in _destinations_shown:
 		var dest := _sim.destinations[i]
-		var markers: Array[MeshInstance3D] = _pin_markers[i]
-		for j in markers.size():
-			markers[j].visible = j < dest.pins
+		# Окна гаснут по одному на каждый невыполненный заказ, последнее — плавно, пока идёт таймер.
+		var windows: Array[StandardMaterial3D] = _windows[i]
+		var level := _sim.supply_level(dest)
+		for j in windows.size():
+			windows[j].albedo_color = Palette.WINDOW_OFF.lerp(Palette.WINDOW_LIT, clampf(level - j, 0.0, 1.0))
 		var alpha := 0.0
 		if _sim.is_destination_warning(dest):
 			alpha = 0.15 + 0.4 * (0.5 + 0.5 * sin(Time.get_ticks_msec() / 1000.0 * TAU * BLINK_HZ))
 		_warning_overlays[i].albedo_color.a = alpha
-		var bar := _overflow_bars[i]
-		var ratio := dest.overflow / _sim.balance.overflow_time
-		bar.visible = ratio > 0.0
-		bar.scale.x = maxf(ratio * 1.6, 0.01)
 
 
 func _tree_multimesh(mesh: Mesh, color: Color) -> MultiMesh:
@@ -459,6 +473,20 @@ func _add_strip(st: SurfaceTool, from: Vector3, to: Vector3, width: float, color
 
 ## Четырёхугольник, всегда обращённый лицом вверх. С отключённым отсечением граней Godot освещает
 ## перевёрнутую грань как нижнюю сторону — она темнее и на стыках дорог даёт полосы.
+## Круг радиуса radius на плоскости XZ, лицом вверх.
+func _add_disc(st: SurfaceTool, center: Vector3, radius: float, color: Color) -> void:
+	st.set_color(color)
+	st.set_normal(Vector3.UP)
+	for i in DISC_SEGMENTS:
+		var a := TAU * i / DISC_SEGMENTS
+		var b := TAU * (i + 1) / DISC_SEGMENTS
+		# Порядок вершин — как у _add_quad после разворота (нормаль по векторному произведению вниз),
+		# иначе грань освещалась бы как обратная сторона и выглядела темнее.
+		st.add_vertex(center)
+		st.add_vertex(center + Vector3(cos(a), 0.0, sin(a)) * radius)
+		st.add_vertex(center + Vector3(cos(b), 0.0, sin(b)) * radius)
+
+
 func _add_quad(st: SurfaceTool, corners: Array, color: Color) -> void:
 	var normal: Vector3 = (corners[1] - corners[0]).cross(corners[2] - corners[0])
 	if normal.y > 0.0:

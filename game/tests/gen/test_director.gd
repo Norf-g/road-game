@@ -135,3 +135,28 @@ func test_color_waits_for_room_instead_of_being_skipped() -> void:
 		colors[dest.color] = true
 	assert_true(colors.has(1), "второй цвет появляется, когда для него находится место")
 
+
+func test_destinations_are_two_by_three_with_stub() -> void:
+	var game := _game()
+	var sim: Simulation = game[0]
+	_run(sim, game[1], 25.0)
+	for dest in sim.destinations:
+		assert_true(dest.rect.size == Vector2i(2, 3) or dest.rect.size == Vector2i(3, 2))
+		assert_not_null(dest.stub)
+		assert_false(dest.rect.has_point(dest.stub), "подъезд снаружи здания")
+		assert_eq((dest.stub - dest.entrance).length_squared(), 1, "подъезд — прямо рядом с парковкой")
+		assert_true(sim.network.is_permanent(dest.stub))
+
+
+func test_no_bridge_offers_without_water() -> void:
+	var map := MapData.from_dict({"rows": ["..........", "..........", "..........", "..........", ".........."]})
+	var balance := Balance.from_dict({"week_seconds": 2.0, "house_interval": 100.0, "color_weeks": [0]})
+	var sim := Simulation.new(map, balance, 5)
+	var director := Director.new(sim, map)
+	for i in int(30.0 * Simulation.TICK_RATE):
+		if director.has_offer():
+			assert_false(director.offer.has(Director.Upgrade.BRIDGES), "без воды мосты не предлагаются")
+			director.choose(0)
+		sim.tick()
+	assert_gt(director.week, 5)
+

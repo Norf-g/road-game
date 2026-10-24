@@ -217,7 +217,7 @@ func _select_end(cell: Variant) -> void:
 func _try_anchor(cell: Vector2i) -> void:
 	var dest := sim.destination_at(cell)
 	if dest != null:
-		_last_cell = dest.entrance
+		_last_cell = dest.connection_cell()
 		_anchored = true
 	elif sim.network.is_road(cell) or sim.network.is_terminal(cell):
 		_anchored = true

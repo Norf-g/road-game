@@ -28,6 +28,7 @@ static func from_dict(data: Dictionary) -> MapData:
 			"rect": _rect(dest["rect"]),
 			"entrance": _vec(dest["entrance"]),
 			"color": int(dest["color"]),
+			"stub": _vec(dest["stub"]) if dest.has("stub") else null,
 		})
 	for expansion: Dictionary in data.get("expansions", []):
 		map.expansions.append({"week": int(expansion["week"]), "rect": _rect(expansion["rect"])})

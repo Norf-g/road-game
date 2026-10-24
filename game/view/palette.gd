@@ -13,6 +13,13 @@ const GRID := Color("eae3d7")
 const WATER := Color("9ccbe8")
 const ROAD := Color("7c7c84")
 const BRIDGE := Color("a08f7e")
+## Разметка парковки места назначения.
+const PARKING_LINE := Color("f4efe6")
+## Окна места назначения: горящее (запас терпения есть) и погасшее; рама окон и ворота.
+const WINDOW_LIT := Color("a9c8ea")
+const WINDOW_OFF := Color("4a5563")
+const WINDOW_FRAME := Color("c9ced6")
+const DOOR := Color("3d424a")
 const MOTORWAY := Color("5e5e66")
 const TREE_CROWN := Color("8cc084")
 const TREE_TRUNK := Color("9c7a5b")

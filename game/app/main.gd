@@ -3,6 +3,8 @@ extends Node3D
 ## создаёт партию с модулем генерации и связывает с ней отображение, ввод и интерфейс.
 ## Двигает симуляцию фиксированными шагами с учётом паузы и скорости; пока открыто меню, время стоит.
 ## Кнопка «Назад» Android в игре открывает меню, в меню — закрывает приложение.
+## Отладка на ПК: аргумент --start сразу начинает партию, а правки интерфейса подхватываются на лету
+## (DevReload) — интерфейс пересоздаётся, партия продолжается.
 
 const MAP_PATH := "res://maps/city01.json"
 const BALANCE_PATH := "res://config/balance.json"
@@ -32,10 +34,11 @@ var _director: Director
 var _world: WorldView
 var _camera: CameraController
 var _input := StrokeInput.new()
-var _hud := Hud.new()
+var _hud: Hud
 var _audio := Audio.new()
 var _edge_alerts := EdgeAlerts.new()
-var _menu := MainMenu.new()
+var _menu: MainMenu
+var _dev_reload: DevReload
 var _speed := 1
 var _accumulator := 0.0
 var _game_over_shown := false
@@ -50,12 +53,7 @@ func _ready() -> void:
 	var alerts_layer := CanvasLayer.new()  # под интерфейсом, над картой
 	alerts_layer.add_child(_edge_alerts)
 	add_child(alerts_layer)
-	_hud.layer = 2
-	add_child(_hud)
 	add_child(_input)
-	_hud.set_muted(_audio.muted)
-	_hud.sound_toggled.connect(_audio.set_muted)
-	_hud.button_clicked.connect(_audio.play.bind("click"))
 	_input.action_succeeded.connect(_audio.play)
 	_input.is_over_ui = func(pos: Vector2) -> bool: return _menu.visible or _hud.is_point_over_ui(pos)
 	_input.action_failed.connect(_on_action_failed)
@@ -63,17 +61,58 @@ func _ready() -> void:
 		_world.show_motorway_preview(from, to, valid))
 	_input.motorway_preview_hidden.connect(func() -> void: _world.hide_motorway_preview())
 	_input.motorway_end_selected.connect(func(cell: Variant) -> void: _world.show_end_selection(cell))
+	_build_ui()
+	if DevReload.is_available():
+		_dev_reload = DevReload.new()
+		_dev_reload.ui_changed.connect(_rebuild_ui)
+		add_child(_dev_reload)
+	if OS.get_cmdline_user_args().has("--start"):
+		_start_game()
+	else:
+		_open_menu()
+		_menu.play_intro()
+
+
+## Интерфейс партии и главное меню вместе со всеми связями.
+func _build_ui() -> void:
+	_hud = Hud.new()
+	_hud.layer = 2
+	add_child(_hud)
+	_hud.set_muted(_audio.muted)
+	_hud.sound_toggled.connect(_audio.set_muted)
+	_hud.button_clicked.connect(_audio.play.bind("click"))
 	_hud.tool_selected.connect(func(tool: StrokeInput.Tool) -> void: _input.tool = tool)
 	_hud.speed_selected.connect(func(speed: int) -> void: _speed = speed)
 	_hud.upgrade_chosen.connect(_on_upgrade_chosen)
 	_hud.restart_requested.connect(_start_game)
 	_hud.menu_requested.connect(_open_menu)
+	_menu = MainMenu.new()
 	add_child(_menu)
 	_menu.button_clicked.connect(_audio.play.bind("click"))
 	_menu.start_requested.connect(_start_game)
 	_menu.continue_requested.connect(_close_menu)
 	_menu.exit_requested.connect(get_tree().quit)
-	_open_menu()
+
+
+## Отладка на ПК: файлы интерфейса изменились — пересоздаём интерфейс и возвращаем его состояние.
+func _rebuild_ui() -> void:
+	var menu_open := _menu.visible
+	for node: Node in [_hud, _menu]:
+		remove_child(node)
+		node.free()
+	_dev_reload.reload_scripts()
+	UiTheme.reset()
+	_build_ui()
+	_hud.select_tool(_input.tool)
+	_hud.select_speed(_speed)
+	if menu_open or _sim == null:
+		_open_menu()
+	else:
+		_close_menu()
+		if _director.has_offer():
+			_hud.show_offer(_director.week, _director.offer, _sim.balance)
+		if _sim.game_over:
+			_hud.show_game_over(_sim.score, Records.best_score(), false)
 
 
 func _notification(what: int) -> void:

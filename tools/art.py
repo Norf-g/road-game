@@ -13,6 +13,9 @@
   пикселей снимается пурпурный оттенок; затем картинка обрезается по содержимому и вписывается
   в нужный размер с отступом;
 - фон «opaque»: картинка обрезается по центру до нужных пропорций и уменьшается;
+  «inset» у выхода — картинка занимает только эту долю холста по центру, а её края плавно уходят
+  в прозрачность (передний слой адаптивной иконки Android: лаунчер показывает лишь центр слоя);
+  «flat» у выхода — ровная заливка цветом края исходника (задний слой адаптивной иконки);
 - «recolor_dark» у выхода: тёмные (графитовые) части перекрашиваются в заданный цвет — так иконки
   для тёмных кнопок становятся белыми, а цветной акцент иконок улучшений остаётся. Серые и белые
   детали внутри глифа (разметка дороги, лампы светофора) становятся прорезями, иначе слились бы с белым.
@@ -38,22 +41,21 @@ SOURCE_EXTENSIONS = (".png", ".jpg", ".jpeg", ".webp")
 KEY_INNER = 60.0
 KEY_OUTER = 140.0
 DEFAULT_PADDING = 0.06
+# inset: доля стороны картинки, на которой её край растушёвывается в прозрачность.
+INSET_FEATHER = 0.14
 
 # recolor_dark: пиксели темнее DARK_LUMA (0..255) — графитовый глиф, перекрашиваются; более светлые
 # серые (насыщенность ниже GREY_SATURATION) — прорези; насыщенные цветные — акцент, остаются.
 DARK_LUMA = 85
 GREY_SATURATION = 40
 
-# Фон адаптивной иконки Android — ровный цвет земли из палитры.
-ICON_BACKGROUND = {"path": "game/assets/app/icon_background_432.png", "size": (432, 432), "color": "#F4EFE6"}
-
 STYLE_TITLES = {
     "icon": "Иконки интерфейса",
     "upgrade": "Иконки улучшений",
     "app_icon": "Иконка приложения",
-    "icon_layer": "Слой адаптивной иконки Android",
     "emblem": "Эмблема для меню",
     "banner": "Баннер для магазина",
+    "concept": "Референсы для 3D-моделей",
 }
 
 
@@ -183,6 +185,21 @@ def fit_opaque(image: Image.Image, size: tuple[int, int]) -> Image.Image:
     return rgb.resize(size, Image.LANCZOS)
 
 
+def fit_inset(image: Image.Image, size: tuple[int, int], inset: float) -> Image.Image:
+    inner = (round(size[0] * inset), round(size[1] * inset))
+    content = fit_opaque(image, inner).convert("RGBA")
+    feather = max(1.0, min(inner) * INSET_FEATHER)
+    alpha = Image.new("L", inner)
+    alpha.putdata([
+        round(255 * min(1.0, min(x, y, inner[0] - 1 - x, inner[1] - 1 - y) / feather))
+        for y in range(inner[1]) for x in range(inner[0])
+    ])
+    content.putalpha(alpha)
+    canvas = Image.new("RGBA", size, (0, 0, 0, 0))
+    canvas.paste(content, ((size[0] - inner[0]) // 2, (size[1] - inner[1]) // 2))
+    return canvas
+
+
 def recolor_dark(image: Image.Image, color: str) -> Image.Image:
     target = Image.new("RGB", (1, 1), color).getpixel((0, 0))
     out = []
@@ -208,6 +225,10 @@ def process_item(item: dict, source: Path) -> None:
             result = fit_transparent(keyed, size, output.get("padding", DEFAULT_PADDING))
             if "recolor_dark" in output:
                 result = recolor_dark(result, output["recolor_dark"])
+        elif output.get("flat"):
+            result = Image.new("RGB", size, background_color(image))
+        elif "inset" in output:
+            result = fit_inset(image, size, output["inset"])
         else:
             result = fit_opaque(image, size)
         path = ROOT / output["path"]
@@ -216,16 +237,7 @@ def process_item(item: dict, source: Path) -> None:
         print(f"  -> {output['path']} ({size[0]}×{size[1]})")
 
 
-def ensure_icon_background() -> None:
-    path = ROOT / ICON_BACKGROUND["path"]
-    if not path.exists():
-        path.parent.mkdir(parents=True, exist_ok=True)
-        Image.new("RGB", ICON_BACKGROUND["size"], ICON_BACKGROUND["color"]).save(path)
-        print(f"  -> {ICON_BACKGROUND['path']} (ровный цвет)")
-
-
 def cmd_process(manifest: dict, ids: list[str], force: bool) -> int:
-    ensure_icon_background()
     known = {item["id"]: item for item in manifest["items"]}
     unknown = [item_id for item_id in ids if item_id not in known]
     if unknown:

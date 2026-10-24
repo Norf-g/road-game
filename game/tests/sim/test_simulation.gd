@@ -228,3 +228,46 @@ func test_new_destination_waits_before_first_order() -> void:
 	_run(sim, 0.2)
 	assert_eq(dest.pins, 1, "первый заказ — сразу после задержки")
 
+
+# Место назначения 2×3: здание (3..4, 0..1), торец (3..4, 2) с парковкой (3, 2), подъезд (3, 3).
+const STUB_MAP := {
+	"rows": [".......", ".......", ".......", ".......", "......."],
+	"houses": [{"cell": [0, 3], "color": 0}],
+	"destinations": [{"rect": [3, 0, 2, 3], "entrance": [3, 2], "stub": [3, 3], "color": 0}],
+}
+
+
+func test_stub_is_permanent_and_only_way_in() -> void:
+	var sim := _sim(STUB_MAP)
+	var net := sim.network
+	assert_true(net.is_road(Vector2i(3, 3)), "подъезд появляется вместе со зданием")
+	assert_false(sim.erase_cell(Vector2i(3, 3)), "подъезд не сносится")
+	assert_eq(sim.build_link(Vector2i(2, 2), Vector2i(3, 2)), RoadNetwork.Result.TERMINAL_FULL, "к парковке напрямую не подъехать")
+	_build_path(sim, [Vector2i(0, 3), Vector2i(1, 3), Vector2i(2, 3), Vector2i(3, 3)])
+	_run(sim, 15.0)
+	assert_gt(sim.score, 0, "машины доезжают через подъезд")
+
+
+func test_supply_level_counts_down_to_game_over() -> void:
+	var sim := _sim(LINE_MAP, {"overflow_pins": 4, "overflow_time": 10.0, "supply_windows": 5})
+	var dest: Destination = sim.destinations[0]
+	assert_eq(sim.supply_slots(), 5)
+	assert_almost_eq(sim.supply_level(dest), 5.0, 0.001, "все окна горят")
+	dest.pins = 3
+	assert_almost_eq(sim.supply_level(dest), 2.0, 0.001, "три заказа — три окна погасли")
+	dest.pins = 6
+	assert_almost_eq(sim.supply_level(dest), 1.0, 0.001, "до таймера горит последнее окно")
+	dest.overflow = 5.0
+	assert_almost_eq(sim.supply_level(dest), 0.5, 0.001, "последнее окно гаснет вместе с таймером")
+	dest.overflow = 10.0
+	assert_almost_eq(sim.supply_level(dest), 0.0, 0.001, "все окна погасли — проигрыш")
+
+
+func test_supply_windows_are_proportional() -> void:
+	# Шкала в 10 единиц (9 заказов + таймер) на 5 окон: каждые 2 невыполненных заказа гасят окно.
+	var sim := _sim(LINE_MAP, {"overflow_pins": 9, "overflow_time": 10.0, "supply_windows": 5})
+	var dest: Destination = sim.destinations[0]
+	dest.pins = 2
+	assert_almost_eq(sim.supply_level(dest), 4.0, 0.001)
+	dest.pins = 4
+	assert_almost_eq(sim.supply_level(dest), 3.0, 0.001)
